@@ -1,6 +1,6 @@
 #########################################################################
 ## Estimating size of pre-colonial Indigenous population in Australia  ##
-## August 2024                                                         ##
+## August 2024 / updated May 2026                                                         ##
 ## CJA Bradshaw                                                        ##
 #########################################################################
 
@@ -25,6 +25,7 @@ library(truncnorm)
 library(bootstrap)
 
 ## source functions
+setwd("~/Documents/GitHub/AusIndigN/scripts/source")
 source("matrixOperators.r")
 source("new_lmer_AIC_tables3.R") 
 source("r.squared.R") 
@@ -137,6 +138,7 @@ linreg.ER <- function(x,y) { # where x and y are vectors of the same length; cal
 ## set grids
 
 ## NPP (HadCM3)
+setwd("~/Documents/GitHub/AusIndigN/data")
 nppH <- read.table("NppSahul(0-140ka_rawvalues)_Krapp2021.csv", header=T, sep=",") # 0.5 deg lat resolution
 not.naH <- which(is.na(nppH[,3:dim(nppH)[2]]) == F, arr.ind=T)
 upper.rowH <- as.numeric(not.naH[1,1])
@@ -384,7 +386,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     dim(K.array.parab.rescale2)
     sum(K.array.parab.rescale2, na.rm=T)
     
-    hist.K.parab.pred.rescale2 <- hist(K.parab.pred.rescale2,br=12)
+    hist.K.parab.pred.rescale2 <- hist(K.array.parab.rescale2,br=12)
     hist.K.parab.pred.rescale2.dat <- data.frame(hist.K.parab.pred.rescale2$mids, hist.K.parab.pred.rescale2$density)
 
     # rotate matrix -90 & renumber from oldest to youngest
@@ -631,7 +633,6 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     1/exp(mean(log(bindensModOverl$DratioM2B)))
     
     # generalised linear models
-   
     head(bindensModOverl)
     hist(bindensModOverl$year)
     plot(bindensModOverl$year, bindensModOverl$pdens, xlab="year", ylab="Binford D", pch=19)
@@ -658,7 +659,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     mod.num <- seq(1,Modnum,1)
     
     for(i in 1:Modnum) {
-      fit <- glm(as.formula(mod.vec[i]),family=gaussian(link="log"), data=bindensModOverl, na.action=na.omit)
+      fit <- glm(as.formula(mod.vec[i]),family=Gamma(link="log"), data=bindensModOverl, na.action=na.omit)
       assign(paste("fit",i,sep=""), fit)
       mod.list[[i]] <- fit
       print(i)
@@ -671,7 +672,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     
     ## saturated residual diagnostic
     i <- 1
-    fit <- glm(as.formula(mod.vec[i]),family=gaussian(link="log"), data=bindensModOverl, na.action=na.omit)
+    fit <- glm(as.formula(mod.vec[i]),family=Gamma(link="log"), data=bindensModOverl, na.action=na.omit)
 
     check_model(fit, detrend=F)
     plot_model(fit, show.values=T, vline.color = "purple")
@@ -712,7 +713,367 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     print(c(CV.cor, CV.cor.se))
     
     
+    ## add stochastic spatial resampling procedure to reduce impact of spatial autocorrelation
+    ## ensure that no two points are within 100 km of each other in each resampled dataset;
+    ## repeat 100 times; fit BRT to each resampled dataset;
+    ## extract variable importance and partial dependence plots for each resampled dataset;
+    ## calculate mean and SE of variable importance and partial dependence across resampled dataset
 
+    coords <- as.matrix(bindensModOverl[, c("lon", "lat")])
+
+    # -----------------------------------------------------------
+    # Moran's I correlogram to determine appropriate min.dist
+    # Tests raw response and BRT residuals across 100-km bands
+    # min.dist is set to the lag of peak significant autocorrelation
+    # in the raw response correlogram
+    # -----------------------------------------------------------
+    dist_mat <- sp::spDists(coords, longlat = TRUE)   # pairwise great-circle distances (km)
+
+    y_raw   <- as.numeric(scale(bindensModOverl$DratioM2B.sc))
+    y_resid <- as.numeric(
+      scale(bindensModOverl$DratioM2B.sc -
+              predict(brt.fit, bindensModOverl, n.trees = brt.fit$n.trees))
+    )
+
+    moran_corr <- function(y, dist_mat, breaks) {
+      results <- data.frame(
+        lag_mid = (breaks[-length(breaks)] + breaks[-1]) / 2,
+        moran_I = NA_real_,
+        p_value = NA_real_,
+        n_pairs = NA_integer_
+      )
+      for (i in seq_len(nrow(results))) {
+        lo    <- breaks[i];   hi <- breaks[i + 1]
+        w_mat <- ((dist_mat > lo) & (dist_mat <= hi)) * 1L
+        diag(w_mat) <- 0L
+        results$n_pairs[i] <- sum(w_mat) / 2L
+        if (sum(w_mat) == 0) next
+        w_list <- spdep::mat2listw(w_mat, style = "W", zero.policy = TRUE)
+        mt     <- tryCatch(
+          spdep::moran.test(y, w_list, zero.policy = TRUE, alternative = "two.sided"),
+          error = function(e) NULL
+        )
+        if (!is.null(mt)) {
+          results$moran_I[i] <- mt$estimate["Moran I statistic"]
+          results$p_value[i] <- mt$p.value
+        }
+      }
+      results
+    }
+
+    moran.breaks  <- seq(0, 2000, by = 100)
+    mc_raw        <- moran_corr(y_raw,   dist_mat, moran.breaks)
+    mc_resid      <- moran_corr(y_resid, dist_mat, moran.breaks)
+
+    # lag of peak significant autocorrelation in the raw response → sets min.dist
+    sig_lags <- mc_raw$lag_mid[!is.na(mc_raw$p_value) & mc_raw$p_value < 0.05]
+    min.dist  <- if (length(sig_lags) > 0) min(sig_lags) else 100   # km
+
+    cat("Moran's I correlogram – first significant lag (raw response):", min.dist, "km\n")
+    cat("setting min.dist =", min.dist, "km for spatial thinning\n\n")
+
+    # plot correlogram
+    mc_raw$series   <- "raw response"
+    mc_resid$series <- "BRT residuals"
+    mc_plot <- rbind(mc_raw, mc_resid)
+    mc_plot <- mc_plot[!is.na(mc_plot$n_pairs) & mc_plot$n_pairs > 0, ]
+    mc_plot$sig <- ifelse(mc_plot$p_value < 0.05, "p < 0.05", "p \u2265 0.05")
+
+    print(
+      ggplot(mc_plot, aes(x = lag_mid, y = moran_I)) +
+        geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+        geom_vline(xintercept = min.dist, linetype = "dotted",
+                   colour = "steelblue", linewidth = 0.7) +
+        geom_line(colour = "grey70") +
+        geom_point(aes(fill = sig), shape = 21, size = 3) +
+        scale_fill_manual(values = c("p < 0.05" = "#d73027", "p \u2265 0.05" = "white"),
+                          name = NULL) +
+        scale_x_continuous(breaks = seq(0, 2000, 200)) +
+        facet_wrap(~series, ncol = 1) +
+        labs(x = "distance lag (km)", y = "Moran's I",
+             title = "Moran's I correlogram",
+             subtitle = paste0("dotted line = min.dist (", min.dist, " km)")) +
+        theme_bw(base_size = 12) +
+        theme(legend.position = "bottom")
+    )
+
+    
+    n.resamp   <- 100
+    pd.grid.n  <- 100    # resolution for partial dependence grids
+    n.min      <- 10     # minimum thinned obs to attempt BRT
+
+    # -----------------------------------------------------------
+    # gbm.step does not forward n.minobsinnode to its internal gbm()
+    # calls (it builds them as pasted strings). Patch the body to
+    # inject the parameter so small thinned datasets don't trigger
+    # the "nTrain * bag.fraction <= 2 * n.minobsinnode + 1" error.
+    # -----------------------------------------------------------
+    gbm.step.patched <- gbm.step
+    body_lines <- deparse(body(gbm.step), width.cutoff = 500)
+    body_lines <- gsub("verbose = FALSE\\)",
+                       "verbose = FALSE, n.minobsinnode = n.minobsinnode)",
+                       body_lines)
+    formals(gbm.step.patched)$n.minobsinnode <- 10L
+    body(gbm.step.patched) <- parse(text = paste(body_lines, collapse = "\n"))
+
+    # -----------------------------------------------------------
+    # greedy random spatial thinning: shuffle, then keep points
+    # that are >= min.dist km from all previously kept points
+    # -----------------------------------------------------------
+    spatial_thin <- function(data, coords, min.dist) {
+      idx <- sample(nrow(data))
+      kept <- idx[1]
+      for (i in idx[-1]) {
+        d <- sp::spDistsN1(coords[kept, , drop = FALSE], coords[i, ], longlat = TRUE)
+        if (all(d >= min.dist)) kept <- c(kept, i)
+      }
+      data[kept, ]
+    }
+    
+    # fixed x-grids from full-data range (so PD curves are on a common axis)
+    pd.xgrid <- setNames(
+      lapply(brt.fit$var.names, function(v) {
+        r <- range(bindensModOverl[[v]], na.rm = TRUE)
+        seq(r[1], r[2], length.out = pd.grid.n)
+      }),
+      brt.fit$var.names
+    )
+    
+    # storage
+    var.imp.mat <- matrix(NA, n.resamp, length(brt.fit$var.names),
+                          dimnames = list(NULL, brt.fit$var.names))
+    pd.list <- setNames(
+      lapply(brt.fit$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+      brt.fit$var.names
+    )
+    n.obs.vec <- integer(n.resamp)
+    
+    # -----------------------------------------------------------
+    # adaptive BRT: iterates lr large→small, stopping at the
+    # first value that places n.trees in [target.min, max.trees*0.95]
+    # (largest lr in target range = fewest trees = max efficiency).
+    # step.size, tolerance, and n.minobsinnode are scaled to dataset size.
+    # Uses gbm.step.patched to forward n.minobsinnode correctly.
+    # -----------------------------------------------------------
+    adaptive_brt <- function(dat, gbm.x, gbm.y,
+                             tree.complexity, bag.fraction,
+                             n.folds         = 10,
+                             max.trees       = 50000,
+                             target.min      = 1000,
+                             lr.candidates   = c(0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001)) {
+      n         <- nrow(dat)
+      # larger step.size for larger n: coarser CV steps, faster convergence
+      step.size <- max(5L, round(n / 2L))
+      # loosen tolerance for small n where CV loss is noisier
+      tolerance <- 0.001 * sqrt(30 / n)
+      # scale n.minobsinnode to satisfy: nTrain * bag.fraction > 2 * n.minobsinnode + 1
+      n.train   <- floor(n * (n.folds - 1L) / n.folds)
+      n.minobs  <- max(2L, floor((n.train * bag.fraction - 2) / 2) - 1L)
+
+      best.fit   <- NULL
+      params.log <- NULL
+
+      for (lr in lr.candidates) {
+        fit_try <- tryCatch(
+          suppressMessages(suppressWarnings(
+            gbm.step.patched(dat,
+                             gbm.x           = gbm.x,
+                             gbm.y           = gbm.y,
+                             family          = "gaussian",
+                             max.trees       = max.trees,
+                             tolerance       = tolerance,
+                             learning.rate   = lr,
+                             bag.fraction    = bag.fraction,
+                             tree.complexity = tree.complexity,
+                             step.size       = step.size,
+                             n.folds         = n.folds,
+                             n.minobsinnode  = n.minobs,
+                             silent          = TRUE,
+                             plot.main       = FALSE)
+          )),
+          error = function(e) NULL
+        )
+
+        if (!is.null(fit_try)) {
+          nt         <- fit_try$n.trees
+          best.fit   <- fit_try
+          params.log <- list(lr             = lr,
+                             step.size      = step.size,
+                             tolerance      = round(tolerance, 6),
+                             n.minobsinnode = n.minobs,
+                             n.trees        = nt)
+          # accept: enough trees and didn't hit the ceiling
+          if (nt >= target.min && nt < max.trees * 0.95) break
+        }
+      }
+
+      list(fit = best.fit, params = params.log)
+    }
+
+    # storage
+    params.log.list <- vector("list", n.resamp)
+
+    set.seed(7421)
+
+    for (iter in seq_len(n.resamp)) {
+      thin_dat            <- spatial_thin(bindensModOverl, coords, min.dist)
+      n.obs.vec[iter]     <- nrow(thin_dat)
+
+      if (nrow(thin_dat) < n.min) next
+
+      res_iter                <- adaptive_brt(thin_dat,
+                                              gbm.x           = match(brt.fit$var.names, names(thin_dat)),
+                                              gbm.y           = match("DratioM2B.sc",    names(thin_dat)),
+                                              tree.complexity = 2,
+                                              bag.fraction    = 0.75)
+      fit_iter                <- res_iter$fit
+      params.log.list[[iter]] <- res_iter$params
+
+      if (!is.null(fit_iter)) {
+        vi <- summary(fit_iter, plotit = FALSE)
+        var.imp.mat[iter, vi$var] <- vi$rel.inf
+
+        for (v in brt.fit$var.names) {
+          pd <- plot.gbm(fit_iter, i.var = v,
+                         continuous.resolution = pd.grid.n, return.grid = TRUE)
+          pd.list[[v]][iter, ] <- approx(pd[, 1], pd[, 2],
+                                          xout = pd.xgrid[[v]], rule = 2)$y
+        }
+      }
+
+      if (iter %% 10 == 0) {
+        p <- params.log.list[[iter]]
+        if (!is.null(p)) {
+          cat(sprintf("resample %3d / %d | n = %2d | lr = %.4f | step = %d | n.min = %d | trees = %d\n",
+                      iter, n.resamp, nrow(thin_dat), p$lr, p$step.size, p$n.minobsinnode, p$n.trees))
+        } else {
+          cat(sprintf("resample %3d / %d | n = %2d | fit failed\n", iter, n.resamp, nrow(thin_dat)))
+        }
+      }
+    }
+
+    cat("\ndone.\n")
+    cat("obs per resample  – mean:", round(mean(n.obs.vec), 1),
+        " range:", range(n.obs.vec)[1], "-", range(n.obs.vec)[2], "\n")
+    cat("valid BRT fits    :", sum(!is.na(var.imp.mat[, 1])), "/", n.resamp, "\n")
+
+    # summary of adaptive parameters chosen across resamples
+    params.df <- do.call(rbind, lapply(seq_len(n.resamp), function(r) {
+      p <- params.log.list[[r]]
+      if (is.null(p)) return(data.frame(resamp=r, n.obs=n.obs.vec[r],
+                                         lr=NA, step.size=NA, tolerance=NA, n.trees=NA))
+      data.frame(resamp=r, n.obs=n.obs.vec[r],
+                 lr=p$lr, step.size=p$step.size, tolerance=p$tolerance, n.trees=p$n.trees)
+    }))
+    cat("\nAdaptive parameter summary:\n")
+    print(table(lr = params.df$lr))
+    cat("median n.trees:", median(params.df$n.trees, na.rm=TRUE), "\n")
+
+    ## --- summarise variable importance across resamples ---
+    vi.mean <- colMeans(var.imp.mat, na.rm = TRUE)
+    vi.se   <- apply(var.imp.mat, 2, function(x) sd(x, na.rm=TRUE) / sqrt(sum(!is.na(x))))
+    vi.summary <- data.frame(variable     = names(vi.mean),
+                             mean.rel.inf = vi.mean,
+                             se.rel.inf   = vi.se)
+    print(vi.summary)
+
+    ## --- summarise partial dependence across resamples ---
+    pd.summary <- setNames(
+      lapply(brt.fit$var.names, function(v) {
+        m <- pd.list[[v]]
+        data.frame(x      = pd.xgrid[[v]],
+                   mean.y = colMeans(m, na.rm = TRUE),
+                   se.y   = apply(m, 2, function(col)
+                     sd(col, na.rm=TRUE) / sqrt(sum(!is.na(col)))))
+      }),
+      brt.fit$var.names
+    )
+    
+    library(ggplot2)
+    
+    sc_center <- attr(bindensModOverl$DratioM2B.sc, "scaled:center")
+    sc_scale  <- attr(bindensModOverl$DratioM2B.sc, "scaled:scale")
+    
+    # back-transform helper: standardised PD → original DratioM2B units
+    bt <- function(x) x * sc_scale + sc_center
+    
+    pd_summary_df <- function(pd.lst, pd.xgrid, var.names, label) {
+      do.call(rbind, lapply(var.names, function(v) {
+        m <- pd.lst[[v]]
+        data.frame(
+          variable = v,
+          run      = label,
+          x        = pd.xgrid[[v]],
+          mean.y   = bt(colMeans(m, na.rm = TRUE)),
+          se.y     = apply(m, 2, function(col) sd(col, na.rm=TRUE) / sqrt(sum(!is.na(col)))) * sc_scale
+        )
+      }))
+    }
+    
+    pd100  <- pd_summary_df(pd.list.100, pd.xgrid, brt.fit$var.names, "100 km (resampled)")
+    pd250  <- pd_summary_df(pd.list,     pd.xgrid, brt.fit$var.names, "250 km (resampled)")
+    
+    pd_orig <- do.call(rbind, lapply(brt.fit$var.names, function(v) {
+      raw <- plot.gbm(brt.fit, i.var = v, continuous.resolution = 200, return.grid = TRUE)
+      data.frame(
+        variable = v,
+        run      = "Full-data BRT",
+        x        = pd.xgrid[[v]],
+        mean.y   = bt(approx(raw[, 1], raw[, 2], xout = pd.xgrid[[v]], rule = 2)$y),
+        se.y     = 0
+      )
+    }))
+    
+    pd_all <- rbind(pd100, pd250, pd_orig)
+    pd_all$run <- factor(pd_all$run,
+                         levels = c("Full-data BRT", "100 km (resampled)", "250 km (resampled)"))
+    pd_all$var_label <- ifelse(pd_all$variable == "year", "Year", "Latitude (°)")
+    
+    ggplot(pd_all, aes(x = x, y = mean.y, colour = run, fill = run)) +
+      geom_ribbon(data  = subset(pd_all, run != "full-data BRT"),
+                  aes(ymin = mean.y - se.y, ymax = mean.y + se.y),
+                  alpha = 0.15, colour = NA) +
+      geom_line(aes(linewidth = run == "full-data BRT")) +
+      scale_linewidth_manual(values = c(`TRUE` = 1.1, `FALSE` = 0.75), guide = "none") +
+      scale_colour_manual(values = c("full-data BRT"      = "black",
+                                     "100 km (resampled)" = "#e07b54",
+                                     "250 km (resampled)" = "#4e9ac7"),
+                          name = NULL) +
+      scale_fill_manual(values   = c("Full-data BRT"      = NA,
+                                     "100 km (resampled)" = "#e07b54",
+                                     "250 km (resampled)" = "#4e9ac7"),
+                        name = NULL) +
+      facet_wrap(~var_label, scales = "free_x", ncol = 2) +
+      labs(x    = NULL,
+           y    = expression(paste("model:Binford population density ratio (", italic(D)[ratio], ")")),
+           title = "BRT partial dependence: full-data vs. spatially resampled fits") +
+      theme_bw(base_size = 12) +
+      theme(legend.position  = "bottom",
+            strip.text       = element_text(face = "bold"))
+
+    out_dir <- "/Users/brad0317/Documents/GitHub/AusIndigN/out/"
+    
+    # pd_all — the full partial dependence comparison table
+    write.csv(pd_all,
+              file = file.path(out_dir, "BRT_pd_all.csv"),
+              row.names = FALSE)
+    
+    # scaling parameters as a one-row lookup table
+    sc_params <- data.frame(
+      variable        = "DratioM2B",
+      scaled.center   = sc_center,
+      scaled.scale    = sc_scale,
+      back_transform  = "x * scaled.scale + scaled.center"
+    )
+    write.csv(sc_params,
+              file = file.path(out_dir, "BRT_scaling_params.csv"),
+              row.names = FALSE)
+    
+    cat("written:\n")
+    cat(" ", file.path(out_dir, "BRT_pd_all.csv"),       "—", nrow(pd_all), "rows\n")
+    cat(" ", file.path(out_dir, "BRT_scaling_params.csv"), "— scaling parameters\n")
+    
+    
     ############################################################################################
     ## simple demographic model to estimate total mortality rate required to move from various
     ## pre-European estimates to the 1850 estimate of ~ 220 000
