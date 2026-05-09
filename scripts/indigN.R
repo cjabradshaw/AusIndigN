@@ -5,24 +5,27 @@
 #########################################################################
 
 ## libraries
-library(sp)
-library(raster)
-library(oceanmap)
-library(OceanView)
 library(abind)
-library(pracma)
+library(bootstrap)
 library(binford)
-library(rgl)
-library(scatterplot3d) 
-library(spatstat)
-library(spatialEco)
-library(SpatialPack)
-library(performance)
-library(sjPlot)
 library(dismo)
 library(gbm)
+library(ggplot2)
+library(ncdf4)
+library(oceanmap)
+library(OceanView)
+library(performance)
+library(pracma)
+library(raster)
+library(rgl)
+library(sp)
+library(scatterplot3d) 
+library(spatialEco)
+library(sjPlot)
+library(SpatialPack)
+library(spatstat)
+library(terra)
 library(truncnorm)
-library(bootstrap)
 
 ## source functions
 setwd("~/Documents/GitHub/AusIndigN/scripts/source")
@@ -708,9 +711,98 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     BRTmodDBinD.dat <- data.frame("latx"=x2, "laty"=y2, "yearx"=x1, "yeary"=y1)
     write.table(BRTmodDBinD.dat, "BRTmodDBinD.csv", sep=",", row.names = F)
     
-    CV.cor <fitted.varsCV.cor <- 100 * brt.fit$cv.statistics$correlation.mean
+    CV.cor <- fitted.varsCV.cor <- 100 * brt.fit$cv.statistics$correlation.mean
     CV.cor.se <- 100 * brt.fit$cv.statistics$correlation.se
     print(c(CV.cor, CV.cor.se))
+    
+    ####################################
+    ## remove arid and semi-arid points
+    ## rainfall data
+    ## https://ausenv.tern.org.au/aer/how-to-use-australias-environment-data-explorer/aer/australias-environment/index.html
+    ## https://thredds.nci.org.au/thredds/catalog/ub8/au/OzWALD/annual/catalog.html
+    
+    setwd("~/Documents/GitHub/AusIndigN/data")
+    rain <- nc_open("OzWALD.annual.Pg.AnnualSums.nc")
+    print(rain)
+    rain.dat <- ncvar_get(rain, "AnnualSums")
+    lon.rain <- ncvar_get(rain, "longitude")
+    lat.rain <- ncvar_get(rain, "latitude")
+    
+    rain.rst <- rast(rain.dat)
+    ext(rain.rst) <- ext(min(lon.rain), max(lon.rain), min(lat.rain, na.rm=T), max(lat.rain, na.rm=T))
+    crs(rain.rst) <- "epsg:4326"  # set the coordinate reference system (typically WGS84)
+    nc_close(rain)
+    terra::plot(rain.rst)
+    rain.rst
+    rain.mn.rst <- app(rain.rst, fun = mean, na.rm = T)
+    terra::plot(rain.mn.rst)
+    
+    ## overlay bindensModOverl points on rain.mn.rst
+    bindensModOverl.coords <- bindensModOverl[, c("lon", "lat")]
+    rownames(bindensModOverl.coords) <- bindensModOverl$GN
+    bindensModOverl.pts <- vect(bindensModOverl.coords, crs = crs(rain.mn.rst))
+    terra::plot(rain.mn.rst)
+    plot(bindensModOverl.pts, add = TRUE, col = "red", pch = 19)
+    
+    # extract
+    head(bindensModOverl)
+    bindensModOverlrain <- terra::extract(rain.mn.rst, bindensModOverl.coords, method = "bilinear", search_radius = 20000)
+    head(bindensModOverlrain)
+    
+    # add to data
+    head(bindensModOverl)
+    bindensModOverl$rain <- bindensModOverlrain$mean
+    head(bindensModOverl)
+    
+    ## which points have no rainfall?
+    bindensModOverl[which(is.na(bindensModOverl$rain) == T),]
+    
+    ## which points have rainfall ≤ 250 mm/year (arid), and which have > 250 mm/year but ≤ 350 mm/year (semi-arid)?
+    bindensModOverl$arid <- ifelse(bindensModOverl$rain <= 250, 1, 0)
+    bindensModOverl$semi.arid <- ifelse(bindensModOverl$rain > 250 & bindensModOverl$rain <= 370, 1, 0)
+    bindensModOverl$ar.sabin <- ifelse(bindensModOverl$arid == 1 | bindensModOverl$semi.arid == 1, 1, 0)
+    
+    ## only take non-arid/non-semi-arid points
+    bindensModOverl.wet <- bindensModOverl[bindensModOverl$ar.sabin == 0, ]
+    head(bindensModOverl.wet)
+    dim(bindensModOverl.wet)
+    dim(bindensModOverl)
+    
+    sum(bindensModOverl$ar.sabin)
+    sum(bindensModOverl$arid)
+    sum(bindensModOverl$semi.arid)
+    
+    ## save to .csv
+    setwd("/Users/brad0317/Documents/GitHub/AusIndigN/out")
+    write.table(bindensModOverl.wet, "bindensModOverl.wet.csv", sep=",", row.names = F)
+    write.table(bindensModOverl, "bindensModOverl.csv", sep=",", row.names = F)
+    
+    
+    brt.fit.wet <- gbm.step(bindensModOverl.wet, gbm.x = attr(bindensModOverl.wet, "names")[c(2,4)],
+                        gbm.y = attr(bindensModOverl.wet, "names")[11], 
+                        family="gaussian", max.trees=100000, tolerance = 0.0002, learning.rate = 0.00025, 
+                        bag.fraction=0.75, tree.complexity = 2)
+    summary(brt.fit.wet)
+    gbmpl <- gbm.plot(brt.fit.wet, smooth=T, n.plots=2, common.scale=T, y.label="log10 model D:Binford D", plot.layout = c(1,2),
+                      show.contrib = T, rug=T)
+    gbm.plot.fits(brt.fit.wet)
+    brt.fit.wet$fitted.vars
+    
+    par(mfrow=c(1,2))
+    x2.wet <- plot.gbm(brt.fit.wet, i.var=brt.fit.wet$var.names[2], continuous.resolution=100, return.grid=T)[,1]
+    y2.wet <- 10^plot.gbm(brt.fit.wet, i.var=brt.fit.wet$var.names[2], continuous.resolution=100, return.grid=T)[,2]
+    plot(x2.wet,y2.wet,type="l", xlab=brt.fit.wet$var.names[2], ylab="model D:Binford D", ylim=c(0,9))
+    x1.wet <- plot.gbm(brt.fit.wet, i.var=brt.fit.wet$var.names[1], continuous.resolution=100, return.grid=T)[,1]
+    y1.wet <- 10^plot.gbm(brt.fit.wet, i.var=brt.fit.wet$var.names[1], continuous.resolution=100, return.grid=T)[,2]
+    plot(x1.wet,y1.wet,type="l", xlab=brt.fit.wet$var.names[1], ylab="model D:Binford D", ylim=c(0,9))
+    par(mfrow=c(1,1))
+    
+    BRTmodDBinDwet.dat <- data.frame("latx"=x2.wet, "laty"=y2.wet, "yearx"=x1.wet, "yeary"=y1.wet)
+    write.table(BRTmodDBinDwet.dat, "BRTmodDBinDwet.csv", sep=",", row.names = F)
+    
+    CV.cor.wet <- fitted.varsCV.cor.wet <- 100 * brt.fit.wet$cv.statistics$correlation.mean
+    CV.cor.se.wet <- 100 * brt.fit.wet$cv.statistics$correlation.se
+    print(c(CV.cor.wet, CV.cor.se.wet))
     
     
     ## add stochastic spatial resampling procedure to reduce impact of spatial autocorrelation
@@ -719,7 +811,8 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     ## extract variable importance and partial dependence plots for each resampled dataset;
     ## calculate mean and SE of variable importance and partial dependence across resampled dataset
 
-    coords <- as.matrix(bindensModOverl[, c("lon", "lat")])
+    #coords <- as.matrix(bindensModOverl[, c("lon", "lat")])
+    coords <- as.matrix(bindensModOverl.wet[, c("lon", "lat")])
 
     # -----------------------------------------------------------
     # Moran's I correlogram to determine appropriate min.dist
@@ -729,12 +822,19 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     # -----------------------------------------------------------
     dist_mat <- sp::spDists(coords, longlat = TRUE)   # pairwise great-circle distances (km)
 
-    y_raw   <- as.numeric(scale(bindensModOverl$DratioM2B.sc))
-    y_resid <- as.numeric(
-      scale(bindensModOverl$DratioM2B.sc -
-              predict(brt.fit, bindensModOverl, n.trees = brt.fit$n.trees))
-    )
+    #y_raw   <- as.numeric(scale(bindensModOverl$DratioM2B.sc))
+    #y_resid <- as.numeric(
+    #  scale(bindensModOverl$DratioM2B.sc -
+    #          predict(brt.fit, bindensModOverl, n.trees = brt.fit$n.trees))
+    #)
 
+    y_raw   <- as.numeric(scale(bindensModOverl.wet$DratioM2B.sc))
+    y_resid <- as.numeric(
+      scale(bindensModOverl.wet$DratioM2B.sc -
+              predict(brt.fit.wet, bindensModOverl.wet, n.trees = brt.fit.wet$n.trees))
+    )
+    
+    
     moran_corr <- function(y, dist_mat, breaks) {
       results <- data.frame(
         lag_mid = (breaks[-length(breaks)] + breaks[-1]) / 2,
@@ -767,8 +867,9 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
 
     # lag of peak significant autocorrelation in the raw response → sets min.dist
     sig_lags <- mc_raw$lag_mid[!is.na(mc_raw$p_value) & mc_raw$p_value < 0.05]
-    min.dist  <- if (length(sig_lags) > 0) min(sig_lags) else 100   # km
-
+    #min.dist  <- if (length(sig_lags) > 0) min(sig_lags) else 100   # km
+    min.dist <- 200
+    
     cat("Moran's I correlogram – first significant lag (raw response):", min.dist, "km\n")
     cat("setting min.dist =", min.dist, "km for spatial thinning\n\n")
 
@@ -831,20 +932,29 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     }
     
     # fixed x-grids from full-data range (so PD curves are on a common axis)
+    # pd.xgrid <- setNames(
+    #   lapply(brt.fit$var.names, function(v) {
+    #     r <- range(bindensModOverl[[v]], na.rm = TRUE)
+    #     seq(r[1], r[2], length.out = pd.grid.n)
+    #   }),
+    #   brt.fit$var.names
+    # )
+    
     pd.xgrid <- setNames(
-      lapply(brt.fit$var.names, function(v) {
-        r <- range(bindensModOverl[[v]], na.rm = TRUE)
+      lapply(brt.fit.wet$var.names, function(v) {
+        r <- range(bindensModOverl.wet[[v]], na.rm = TRUE)
         seq(r[1], r[2], length.out = pd.grid.n)
       }),
-      brt.fit$var.names
+      brt.fit.wet$var.names
     )
     
     # storage
     var.imp.mat <- matrix(NA, n.resamp, length(brt.fit$var.names),
                           dimnames = list(NULL, brt.fit$var.names))
+    
     pd.list <- setNames(
-      lapply(brt.fit$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
-      brt.fit$var.names
+     lapply(brt.fit$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+     brt.fit$var.names
     )
     n.obs.vec <- integer(n.resamp)
     
@@ -912,17 +1022,22 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
 
     # storage
     params.log.list <- vector("list", n.resamp)
+    cv.cor.vec      <- rep(NA_real_, n.resamp)   # CV correlation (mean across folds)
+    cv.cor.se.vec   <- rep(NA_real_, n.resamp)   # CV correlation SE
+    cv.dev.vec      <- rep(NA_real_, n.resamp)   # CV deviance (mean across folds)
+    cv.dev.se.vec   <- rep(NA_real_, n.resamp)   # CV deviance SE
 
     set.seed(7421)
 
     for (iter in seq_len(n.resamp)) {
-      thin_dat            <- spatial_thin(bindensModOverl, coords, min.dist)
+    #  thin_dat            <- spatial_thin(bindensModOverl, coords, min.dist)
+      thin_dat            <- spatial_thin(bindensModOverl.wet, coords, min.dist)
       n.obs.vec[iter]     <- nrow(thin_dat)
 
       if (nrow(thin_dat) < n.min) next
 
       res_iter                <- adaptive_brt(thin_dat,
-                                              gbm.x           = match(brt.fit$var.names, names(thin_dat)),
+                                              gbm.x           = match(brt.fit.wet$var.names, names(thin_dat)),
                                               gbm.y           = match("DratioM2B.sc",    names(thin_dat)),
                                               tree.complexity = 2,
                                               bag.fraction    = 0.75)
@@ -939,13 +1054,20 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
           pd.list[[v]][iter, ] <- approx(pd[, 1], pd[, 2],
                                           xout = pd.xgrid[[v]], rule = 2)$y
         }
+
+        # retain CV statistics for this resample
+        cv.cor.vec[iter]    <- fit_iter$cv.statistics$correlation.mean
+        cv.cor.se.vec[iter] <- fit_iter$cv.statistics$correlation.se
+        cv.dev.vec[iter]    <- fit_iter$cv.statistics$deviance.mean
+        cv.dev.se.vec[iter] <- fit_iter$cv.statistics$deviance.se
       }
 
       if (iter %% 10 == 0) {
         p <- params.log.list[[iter]]
         if (!is.null(p)) {
-          cat(sprintf("resample %3d / %d | n = %2d | lr = %.4f | step = %d | n.min = %d | trees = %d\n",
-                      iter, n.resamp, nrow(thin_dat), p$lr, p$step.size, p$n.minobsinnode, p$n.trees))
+          cat(sprintf("resample %3d / %d | n = %2d | lr = %.4f | trees = %d | CV.cor = %.3f\n",
+                      iter, n.resamp, nrow(thin_dat), p$lr, p$n.trees,
+                      cv.cor.vec[iter]))
         } else {
           cat(sprintf("resample %3d / %d | n = %2d | fit failed\n", iter, n.resamp, nrow(thin_dat)))
         }
@@ -957,17 +1079,39 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
         " range:", range(n.obs.vec)[1], "-", range(n.obs.vec)[2], "\n")
     cat("valid BRT fits    :", sum(!is.na(var.imp.mat[, 1])), "/", n.resamp, "\n")
 
-    # summary of adaptive parameters chosen across resamples
+    # summary of adaptive parameters and CV statistics across resamples
     params.df <- do.call(rbind, lapply(seq_len(n.resamp), function(r) {
       p <- params.log.list[[r]]
-      if (is.null(p)) return(data.frame(resamp=r, n.obs=n.obs.vec[r],
-                                         lr=NA, step.size=NA, tolerance=NA, n.trees=NA))
-      data.frame(resamp=r, n.obs=n.obs.vec[r],
-                 lr=p$lr, step.size=p$step.size, tolerance=p$tolerance, n.trees=p$n.trees)
+      if (is.null(p)) return(data.frame(resamp      = r,
+                                        n.obs       = n.obs.vec[r],
+                                        lr          = NA, step.size = NA,
+                                        tolerance   = NA, n.trees   = NA,
+                                        cv.cor      = NA, cv.cor.se = NA,
+                                        cv.dev      = NA, cv.dev.se = NA))
+      data.frame(resamp      = r,
+                 n.obs       = n.obs.vec[r],
+                 lr          = p$lr,
+                 step.size   = p$step.size,
+                 tolerance   = p$tolerance,
+                 n.trees     = p$n.trees,
+                 cv.cor      = cv.cor.vec[r],
+                 cv.cor.se   = cv.cor.se.vec[r],
+                 cv.dev      = cv.dev.vec[r],
+                 cv.dev.se   = cv.dev.se.vec[r])
     }))
     cat("\nAdaptive parameter summary:\n")
     print(table(lr = params.df$lr))
     cat("median n.trees:", median(params.df$n.trees, na.rm=TRUE), "\n")
+
+    cat("\nCV performance across resamples:\n")
+    cat(sprintf("  CV correlation – mean: %.3f  SE: %.4f  range: [%.3f, %.3f]\n",
+                mean(params.df$cv.cor, na.rm=TRUE),
+                sd(params.df$cv.cor,   na.rm=TRUE) / sqrt(sum(!is.na(params.df$cv.cor))),
+                min(params.df$cv.cor,  na.rm=TRUE),
+                max(params.df$cv.cor,  na.rm=TRUE)))
+    cat(sprintf("  CV deviance   – mean: %.3f  SE: %.4f\n",
+                mean(params.df$cv.dev, na.rm=TRUE),
+                sd(params.df$cv.dev,   na.rm=TRUE) / sqrt(sum(!is.na(params.df$cv.dev)))))
 
     ## --- summarise variable importance across resamples ---
     vi.mean <- colMeans(var.imp.mat, na.rm = TRUE)
@@ -980,7 +1124,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     ## --- summarise partial dependence across resamples ---
     pd.summary <- setNames(
       lapply(brt.fit$var.names, function(v) {
-        m <- pd.list[[v]]
+          m <- pd.list[[v]]
         data.frame(x      = pd.xgrid[[v]],
                    mean.y = colMeans(m, na.rm = TRUE),
                    se.y   = apply(m, 2, function(col)
@@ -989,10 +1133,8 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       brt.fit$var.names
     )
     
-    library(ggplot2)
-    
-    sc_center <- attr(bindensModOverl$DratioM2B.sc, "scaled:center")
     sc_scale  <- attr(bindensModOverl$DratioM2B.sc, "scaled:scale")
+    sc_center <- attr(bindensModOverl$DratioM2B.sc, "scaled:center")
     
     # back-transform helper: standardised PD → original DratioM2B units
     bt <- function(x) x * sc_scale + sc_center
@@ -1010,14 +1152,17 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       }))
     }
     
-    pd100  <- pd_summary_df(pd.list.100, pd.xgrid, brt.fit$var.names, "100 km (resampled)")
-    pd250  <- pd_summary_df(pd.list,     pd.xgrid, brt.fit$var.names, "250 km (resampled)")
-    
+    #pd100  <- pd_summary_df(pd.list.100, pd.xgrid, brt.fit$var.names, "100 km (resampled)")
+    #pd250  <- pd_summary_df(pd.list, pd.xgrid, brt.fit$var.names, "250 km (resampled)")
+    pd100.wet  <- pd_summary_df(pd.list, pd.xgrid, brt.fit.wet$var.names, "100 km (resampled)")
+    # save to .csv
+    write.csv(pd100.wet, "pdwet.csv", row.names = FALSE)
+        
     pd_orig <- do.call(rbind, lapply(brt.fit$var.names, function(v) {
       raw <- plot.gbm(brt.fit, i.var = v, continuous.resolution = 200, return.grid = TRUE)
       data.frame(
         variable = v,
-        run      = "Full-data BRT",
+        run      = "full-data BRT",
         x        = pd.xgrid[[v]],
         mean.y   = bt(approx(raw[, 1], raw[, 2], xout = pd.xgrid[[v]], rule = 2)$y),
         se.y     = 0
@@ -1026,7 +1171,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     
     pd_all <- rbind(pd100, pd250, pd_orig)
     pd_all$run <- factor(pd_all$run,
-                         levels = c("Full-data BRT", "100 km (resampled)", "250 km (resampled)"))
+                         levels = c("full-data BRT", "100 km (resampled)", "250 km (resampled)"))
     pd_all$var_label <- ifelse(pd_all$variable == "year", "Year", "Latitude (°)")
     
     ggplot(pd_all, aes(x = x, y = mean.y, colour = run, fill = run)) +
@@ -1039,7 +1184,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
                                      "100 km (resampled)" = "#e07b54",
                                      "250 km (resampled)" = "#4e9ac7"),
                           name = NULL) +
-      scale_fill_manual(values   = c("Full-data BRT"      = NA,
+      scale_fill_manual(values   = c("full-data BRT"      = NA,
                                      "100 km (resampled)" = "#e07b54",
                                      "250 km (resampled)" = "#4e9ac7"),
                         name = NULL) +
@@ -1058,6 +1203,10 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
               file = file.path(out_dir, "BRT_pd_all.csv"),
               row.names = FALSE)
     
+    write.csv(pd100.wet,
+              file = file.path(out_dir, "BRT_pd_wet_100.csv"),
+              row.names = FALSE)
+    
     # scaling parameters as a one-row lookup table
     sc_params <- data.frame(
       variable        = "DratioM2B",
@@ -1072,6 +1221,9 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     cat("written:\n")
     cat(" ", file.path(out_dir, "BRT_pd_all.csv"),       "—", nrow(pd_all), "rows\n")
     cat(" ", file.path(out_dir, "BRT_scaling_params.csv"), "— scaling parameters\n")
+    
+    
+    
     
     
     ############################################################################################
@@ -1132,6 +1284,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     prim.lo <- round(quantile(primiparity.walker,probs=0.025),0)
     prim.hi <- round(quantile(primiparity.walker,probs=0.975),0)
     
+    setwd("/Users/brad0317/Documents/GitHub/AusIndigN/data/")
     dat.world13 <- read.table("world2013lifetable.csv", header=T, sep=",")
     fert.world13 <- dat.world13$m.f
     fert.trunc <- fert.world13[1:(longev+1)]
@@ -1179,8 +1332,8 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     ## set time limit for projection in 1-yr increments
     yr.st <- 1788
     #************************
-    #yr.end <- 1861 # set projection end date
-    yr.end <- 1901 # set projection end date
+    yr.end <- 1861 # set projection end date
+    #yr.end <- 1901 # set projection end date
     #yr.end <- 1971 # set projection end date
     #************************
     t <- (yr.end - yr.st)
@@ -1209,23 +1362,56 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     plot(K.vec, red.vec,pch=19,type="b")
     Kred.dat <- data.frame(K.vec, red.vec)
     
+    # linearise model to find initial parameters for non-linear model
+    lp_start <- function(K.vec, red.vec, fix.a = TRUE) {
+      ok <- is.finite(K.vec) & is.finite(red.vec) & K.vec > 0 & red.vec > 0
+      K <- K.vec[ok]
+      r <- red.vec[ok]
+      
+      if (fix.a) {
+        keep <- r < 1
+        z <- log(1 / r[keep] - 1)
+        fit0 <- lm(z ~ log(K[keep]))
+        c0 <- unname(coef(fit0)[2])
+        b0 <- exp(-unname(coef(fit0)[1]) / c0)
+        return(c(b = b0, c = c0))
+      }
+      
+      eps <- max(1e-4, 0.05 * diff(range(r)))
+      a0 <- max(r) + eps
+      z <- log(a0 / r - 1)
+      fit0 <- lm(z ~ log(K))
+      c0 <- max(unname(coef(fit0)[2]), 1e-3)
+      b0 <- exp(-unname(coef(fit0)[1]) / c0)
+      c(a = a0, b = b0, c = c0)
+    }
+    
     # logistic power function a/(1+(x/b)^c)
-    param.init <- c(1, K.max, 1)
-    fit.lp <- nls(red.vec ~ a/(1+(K.vec/b)^c), 
-                     data = Kred.dat,
-                     algorithm = "port",
-                     start = c(a = param.init[1], b = param.init[2], c = param.init[3]),
-                     trace = TRUE,      
-                     nls.control(maxiter = 1000, tol = 1e-05, minFactor = 1/1024))
+    param.init <- lp_start(K.vec, red.vec, fix.a = TRUE)
+    
+    fit.lp <- nls(
+      red.vec ~ 1 / (1 + (K.vec / b)^c),
+      data = Kred.dat,
+      algorithm = "port",
+      start = as.list(param.init),
+      lower = c(b = .Machine$double.eps, c = .Machine$double.eps),
+      control = nls.control(maxiter = 1000, tol = 1e-05, minFactor = 1/1024),
+      trace = TRUE
+    )
+    
     fit.lp.summ <- summary(fit.lp)
     plot(K.vec, red.vec, pch=19,xlab="N",ylab="reduction factor")
     K.vec.cont <- seq(1,2*pop.found,1)
-    pred.lp.fx <- coef(fit.lp)[1]/(1+(K.vec.cont/coef(fit.lp)[2])^coef(fit.lp)[3])
+    #pred.lp.fx <- coef(fit.lp)[1]/(1+(K.vec.cont/coef(fit.lp)[2])^coef(fit.lp)[3])
+    pred.lp.fx <- 1/(1+(K.vec.cont/coef(fit.lp)[1])^coef(fit.lp)[2])
     lines(K.vec.cont, pred.lp.fx, lty=3,lwd=3,col="red")
     
-    a.lp <- coef(fit.lp)[1]
-    b.lp <- coef(fit.lp)[2]
-    c.lp <- coef(fit.lp)[3]
+    #a.lp <- coef(fit.lp)[1]
+    a.lp <- 1
+    #b.lp <- coef(fit.lp)[2]
+    b.lp <- coef(fit.lp)[1]
+    #c.lp <- coef(fit.lp)[3]
+    c.lp <- coef(fit.lp)[2]
     
     ## compensatory density-feedback deterministic model
     ## set population storage matrices
@@ -1291,7 +1477,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     n.up <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.975, na.rm=T) # upper over all iterations
     n.lo <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.025, na.rm=T) # lower over all iterations
     
-    plot(yrs,n.md,type="l", main = "", xlab="year", ylab="pN1", lwd=2, ylim=c(0.95*min(n.lo),1.05*max(n.up)))
+    plot(yrs,n.md,type="l", main = "", xlab="year", ylab="pN1", lwd=2, ylim=c(0.95*min(n.lo, na.rm=T),1.05*max(n.up, na.rm=T)))
     lines(yrs,n.lo,lty=2,col="red",lwd=1.5)
     lines(yrs,n.up,lty=2,col="red",lwd=1.5)
     
@@ -1306,8 +1492,8 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     itdiv <- iter/10
     
     # kill (average additional deaths/year)
-    #killed.pyr.vec <- seq(1000, 41000, 500) # to 1861
-    killed.pyr.vec <- seq(1000, 33000, 500) # to 1901
+    killed.pyr.vec <- seq(1000, 41000, 500) # to 1861
+    #killed.pyr.vec <- seq(1000, 33000, 500) # to 1901
     
     N.md.end <- N.lo.end <- N.up.end <- rep(NA, length(killed.pyr.vec))
     
@@ -1355,7 +1541,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       n.up <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.975, na.rm=T) # upper over all iterations
       n.lo <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.025, na.rm=T) # lower over all iterations
       
-      plot(yrs,n.md,type="l", main = "", xlab="year", ylab="N", lwd=2, ylim=c(0.95*min(n.lo),1.05*max(n.up)))
+      plot(yrs,n.md,type="l", main = "", xlab="year", ylab="N", lwd=2, ylim=c(0.95*min(n.lo, na.rm=T),1.05*max(n.up, na.rm=T)))
       lines(yrs,n.lo,lty=2,col="red",lwd=1.5)
       lines(yrs,n.up,lty=2,col="red",lwd=1.5)
       
@@ -1371,21 +1557,21 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     
     tot.add.deaths <- t*killed.pyr.vec*2
     plot(tot.add.deaths, 2*N.md.end, type="l", main="", xlab="total extra deaths 1788-1861", ylab="N (1861)",
-         ylim=c(min(2*N.lo.end), max(2*N.up.end)))
+         ylim=c(min(2*N.lo.end, na.rm=T), max(2*N.up.end, na.rm=T)))
     lines(tot.add.deaths, 2*N.lo.end, lty=2, col="red")
     lines(tot.add.deaths, 2*N.up.end, lty=2, col="red")
-    #abline(h = 192845, lty=2, col="red", lwd=2) # to 1861
-    #abline(h = 177538, lty=2, col="red", lwd=2) # to 1861
-    abline(h = 134171, lty=2, col="red", lwd=2) # to 1901
-    abline(h = 92334, lty=2, col="red", lwd=2) # to 1901
+    abline(h = 192845, lty=2, col="red", lwd=2) # to 1861
+    abline(h = 177538, lty=2, col="red", lwd=2) # to 1861
+    #abline(h = 134171, lty=2, col="red", lwd=2) # to 1901
+    #abline(h = 92334, lty=2, col="red", lwd=2) # to 1901
     
     # total deaths to 1861
-    #tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(177538,192845))))] # to 1861
-    #tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(177538,192845))))] # to 1861
+    tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(177538,192845))))] # to 1861
+    tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(177538,192845))))] # to 1861
     
     # total deaths to 1901
-    tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(134171,92334))))] # to 1861
-    tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(134171,92334))))] # to 1861
+    #tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(134171,92334))))] # to 1861
+    #tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(134171,92334))))] # to 1861
     
     tdmn <- mean(c(tdlo,tdup))
     print(c(tdmn, tdup, tdlo))
@@ -1400,10 +1586,11 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     print(c(dpymn, dpyup, dpylo))
     
     # average r to 1861
-    #log(mean(c(177538,192845)) / (pop.found*2)) / t
+    log(mean(c(177538,192845)) / (pop.found*2)) / t
     
     # average r to 1901
-    log(mean(c(134171,92334)) / (pop.found*2)) / t
+    #log(mean(c(134171,92334)) / (pop.found*2)) / t
+    
     
     
     
@@ -2370,8 +2557,6 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     
     
     
-    
-    
     ## 2.5 million
     # initial population vector
     pop.found <- 2500000 / 2
@@ -2610,6 +2795,248 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     # average r to 1901
     log(mean(c(134171,92334)) / (pop.found*2)) / t
     
+    
+    
+    
+    
+    
+    ## 2.22 million
+    # initial population vector
+    pop.found <- 2220000 / 2
+    init.vec <- stable.stage.dist(popmat.orig) * pop.found
+    ssd.human <- stable.stage.dist(popmat.orig)
+    plot(0:80, ssd.human, type="l", xlab="age (years)", ylab="proportion")
+    
+    #################
+    ## project
+    ## set time limit for projection in 1-yr increments
+    yr.st <- 1788
+    #************************
+    #yr.end <- 1861 # set projection end date
+    yr.end <- 1901 # set projection end date
+    #yr.end <- 1971 # set projection end date
+    #************************
+    t <- (yr.end - yr.st)
+    
+    tot.F <- sum(popmat.orig[1,])
+    popmat <- popmat.orig
+    yr.vec <- seq(yr.st,yr.end)
+    
+    ## set population storage matrices
+    n.mat <- matrix(0, nrow=age.max+1,ncol=(t+1))
+    n.mat[,1] <- init.vec
+    
+    ## set up projection loop
+    for (i in 1:t) {
+      n.mat[,i+1] <- popmat %*% n.mat[,i]
+    }
+    
+    n.pred <- colSums(n.mat)
+    yrs <- seq(yr.st, yr.end, 1)
+    plot(yrs, (n.pred),type="l",lty=2,pch=19,xlab="year",ylab="N")
+    
+    # compensatory density feedback
+    K.max <- 1*pop.found
+    K.vec <- c(1, K.max/2, 0.7*K.max, K.max) 
+    red.vec <- c(1,0.9997,0.99881,0.99618)
+    plot(K.vec, red.vec,pch=19,type="b")
+    Kred.dat <- data.frame(K.vec, red.vec)
+    
+    # logistic power function a/(1+(x/b)^c)
+    param.init <- c(1, K.max, 3)
+    fit.lp <- nls(red.vec ~ a/(1+(K.vec/b)^c), 
+                  data = Kred.dat,
+                  algorithm = "port",
+                  start = c(a = param.init[1], b = param.init[2], c = param.init[3]),
+                  trace = TRUE,      
+                  nls.control(maxiter = 1000, tol = 1e-05, minFactor = 1/1024))
+    fit.lp.summ <- summary(fit.lp)
+    plot(K.vec, red.vec, pch=19,xlab="N",ylab="reduction factor")
+    K.vec.cont <- seq(1,2*pop.found,1)
+    pred.lp.fx <- coef(fit.lp)[1]/(1+(K.vec.cont/coef(fit.lp)[2])^coef(fit.lp)[3])
+    lines(K.vec.cont, pred.lp.fx, lty=3,lwd=3,col="red")
+    
+    a.lp <- coef(fit.lp)[1]
+    b.lp <- coef(fit.lp)[2]
+    c.lp <- coef(fit.lp)[3]
+    
+    ## compensatory density-feedback deterministic model
+    ## set population storage matrices
+    n.mat <- matrix(0, nrow=age.max+1, ncol=(t+1))
+    n.mat[,1] <- init.vec
+    popmat <- popmat.orig
+    
+    ## set up projection loop
+    for (i in 1:t) {
+      totN.i <- sum(n.mat[,i])
+      pred.red <- as.numeric(a.lp/(1+(totN.i/b.lp)^c.lp))
+      diag(popmat[2:stages,]) <- Sx*pred.red
+      popmat[stages,stages] <- 0 # Sx[stages-1]
+      popmat.orig <- popmat ## save original matrix
+      n.mat[,i+1] <- popmat %*% n.mat[,i]
+    }
+    
+    n.pred <- colSums(n.mat)
+    plot(yrs, n.pred, type="l",lty=2,pch=19,xlab="year",ylab="N")
+    abline(h=pop.found, lty=2, col="red", lwd=2)
+    
+    ## stochatic projection with density feedback
+    ## set storage matrices & vectors
+    iter <- 1000
+    itdiv <- iter/10
+    
+    n.sums.mat <- matrix(data=NA, nrow=iter, ncol=(t+1))
+    m.arr <- array(data=NA, dim=c(t+1, age.max+1, iter))
+    
+    for (e in 1:iter) {
+      popmat <- popmat.orig
+      
+      n.mat <- matrix(0, nrow=age.max+1,ncol=(t+1))
+      n.mat[,1] <- init.vec
+      
+      for (i in 1:t) {
+        # stochastic survival values
+        s.alpha <- estBetaParams(Sx, Sx.sd^2)$alpha
+        s.beta <- estBetaParams(Sx, Sx.sd^2)$beta
+        s.stoch <- rbeta(length(s.alpha), s.alpha, s.beta)
+        
+        # stochastic fertilty sampler (gaussian)
+        fert.stch <- rnorm(length(popmat[,1]), fert.vec, fert.sd.vec)
+        m.arr[i,,e] <- ifelse(fert.stch < 0, 0, fert.stch)
+        
+        totN.i <- sum(n.mat[,i], na.rm=T)
+        pred.red <- a.lp/(1+(totN.i/b.lp)^c.lp)
+        
+        diag(popmat[2:(age.max+1),]) <- s.stoch*pred.red
+        popmat[age.max+1,age.max+1] <- 0
+        popmat[1,] <- m.arr[i,,e]
+        n.mat[,i+1] <- popmat %*% n.mat[,i]
+        
+      } # end i loop
+      
+      n.sums.mat[e,] <- ((as.vector(colSums(n.mat))/pop.found))
+      
+      if (e %% itdiv==0) print(e) 
+      
+    } # end e loop
+    
+    n.md <- apply(n.sums.mat, MARGIN=2, median, na.rm=T) # mean over all iterations
+    n.up <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.975, na.rm=T) # upper over all iterations
+    n.lo <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.025, na.rm=T) # lower over all iterations
+    
+    plot(yrs,n.md,type="l", main = "", xlab="year", ylab="pN1", lwd=2, ylim=c(0.95*min(n.lo),1.05*max(n.up)))
+    lines(yrs,n.lo,lty=2,col="red",lwd=1.5)
+    lines(yrs,n.up,lty=2,col="red",lwd=1.5)
+    
+    
+    ##############################################
+    ## invoke mortality directly across n vector
+    ##############################################
+    
+    ## stochatic projection with density feedback
+    ## set storage matrices & vectors
+    iter <- 1000
+    itdiv <- iter/10
+    
+    # kill (average additional deaths/year)
+    #killed.pyr.vec <- seq(1000, 19000, 200) # to 1861
+    killed.pyr.vec <- seq(1000, 14000, 200) # to 1901
+    
+    N.md.end <- N.lo.end <- N.up.end <- rep(NA, length(killed.pyr.vec))
+    
+    for (k in 1:length(killed.pyr.vec)) {
+      
+      n.sums.mat <- matrix(data=NA, nrow=iter, ncol=(t+1))
+      m.arr <- array(data=NA, dim=c(t+1, age.max+1, iter))
+      
+      for (e in 1:iter) {
+        popmat <- popmat.orig
+        
+        n.mat <- matrix(0, nrow=age.max+1,ncol=(t+1))
+        n.mat[,1] <- init.vec
+        
+        for (i in 1:t) {
+          # stochastic survival values
+          s.alpha <- estBetaParams(Sx, Sx.sd^2)$alpha
+          s.beta <- estBetaParams(Sx, Sx.sd^2)$beta
+          s.stoch <- rbeta(length(s.alpha), s.alpha, s.beta)
+          
+          # stochastic fertilty sampler (gaussian)
+          fert.stch <- rnorm(length(popmat[,1]), fert.vec, fert.sd.vec)
+          m.arr[i,,e] <- ifelse(fert.stch < 0, 0, fert.stch)
+          
+          totN.i <- sum(n.mat[,i], na.rm=T)
+          pred.red <- a.lp/(1+(totN.i/b.lp)^c.lp)
+          
+          diag(popmat[2:(age.max+1),]) <- s.stoch*pred.red
+          popmat[age.max+1,age.max+1] <- 0
+          popmat[1,] <- m.arr[i,,e]
+          n.mat[,i+1] <- popmat %*% n.mat[,i]
+          
+          # extra deaths
+          n.mat[,i+1] <- n.mat[,i+1] - (ssd.human * killed.pyr.vec[k])
+          
+        } # end i loop
+        
+        n.sums.mat[e,] <- as.vector(colSums(n.mat))
+        
+        if (e %% itdiv==0) print(e) 
+        
+      } # end e loop
+      
+      n.md <- apply(n.sums.mat, MARGIN=2, median, na.rm=T) # mean over all iterations
+      n.up <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.975, na.rm=T) # upper over all iterations
+      n.lo <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.025, na.rm=T) # lower over all iterations
+      
+      plot(yrs,n.md,type="l", main = "", xlab="year", ylab="N", lwd=2, ylim=c(0.95*min(n.lo, na.rm=T),1.05*max(n.up, na.rm=T)))
+      lines(yrs,n.lo,lty=2,col="red",lwd=1.5)
+      lines(yrs,n.up,lty=2,col="red",lwd=1.5)
+      
+      N.md.end[k] <- n.md[length(n.md)]
+      N.lo.end[k] <- n.lo[length(n.md)]
+      N.up.end[k] <- n.up[length(n.md)]
+      
+      print('________________')
+      print(killed.pyr.vec[k])
+      print('________________')
+      
+    } # end k loop
+    
+    tot.add.deaths <- t*killed.pyr.vec*2
+    plot(tot.add.deaths, 2*N.md.end, type="l", main="", xlab="total extra deaths 1788-1861", ylab="N (1861)",
+         ylim=c(min(2*N.lo.end,na.rm=T), max(2*N.up.end, na.rm=T)))
+    lines(tot.add.deaths, 2*N.lo.end, lty=2, col="red")
+    lines(tot.add.deaths, 2*N.up.end, lty=2, col="red")
+    #abline(h = 192845, lty=2, col="red", lwd=2) # to 1861
+    #abline(h = 177538, lty=2, col="red", lwd=2) # to 1861
+    abline(h = 134171, lty=2, col="red", lwd=2) # to 1901
+    abline(h = 92334, lty=2, col="red", lwd=2) # to 1901
+    
+    # total deaths to 1861
+    #tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(177538,192845))))] # to 1861
+    #tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(177538,192845))))] # to 1861
+    
+    # total deaths to 1901
+    tdlo <- tot.add.deaths[which.min(abs(N.lo.end - mean(c(134171,92334))))] # to 1861
+    tdup <- tot.add.deaths[which.min(abs(N.up.end - mean(c(134171,92334))))] # to 1861
+    
+    tdmn <- mean(c(tdlo,tdup))
+    print(c(tdmn, tdup, tdlo))
+    
+    # prop deaths
+    print(c(tdmn / (pop.found*2), tdup / (pop.found*2), tdlo / (pop.found*2)))
+    
+    # average/year
+    dpylo <- tdlo / t
+    dpyup <- tdup / t
+    dpymn <- tdmn / t
+    print(c(dpymn, dpyup, dpylo))
+    
+    # average r to 1861
+    #log(mean(c(177538,192845)) / (pop.found*2)) / t
+    
+    # average r to 1901
+    log(mean(c(134171,92334)) / (pop.found*2)) / t
     
     
     
@@ -3343,6 +3770,7 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     #####################################################
     
     Nmd.npp <- 5222387 # NPP model
+    Nmd.Zhu <- 1556314 # Australia-wide estimate from Zhu et al. (2021) based on Scenario 2
     Nmd.14C <- 1955000; Nlo.14C <- 1160000; Nup.14C <- 2750000 # Williams et al. 2013
     Nmd.TNe <- 1354000; Nlo.TNe <- 308000; Nup.TNe <- 2400000 # Tobler et al. 2017
     Nmd.MNe <- 2946970; Nlo.MNe <- 22960; Nup.MNe <- 5870980 # Malaspinas et al. 2017
@@ -3358,31 +3786,36 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     
     NCV.mn <- mean(c(NCV.14C,NCV.TNe,NCV.MNe))    
     Nse.npp.calc <- Nmd.npp*NCV.mn
+    Nse.Zhu.calc <- Nmd.Zhu*NCV.mn
     
     biter <- 10000
       Nrnd.npp <- round(rtruncnorm(biter, a=0, b=Nmd.npp, mean=Nmd.npp, sd=Nse.npp.calc), 0)
+      Nrnd.Zhu <- round(rtruncnorm(biter, a=0, b=Nmd.Zhu, mean=Nmd.Zhu, sd=Nse.Zhu.calc), 0)
       Nrnd.14C <- round(rnorm(biter, mean=Nmd.14C, sd=Nse.14C), 0)
       Nrnd.TNe <- round(rnorm(biter, mean=Nmd.TNe, sd=Nse.TNe), 0)
       Nrnd.MNe <- round(rnorm(biter, mean=Nmd.MNe, sd=Nse.MNe), 0)
       
-      Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe,Nrnd.MNe)
-      # Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe) # without the Malaspinas estimate
+      Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe,Nrnd.MNe) # including Zhu et al. (2021) estimate
+      #Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe) # including Zhu et al. (2021) & excluding Malaspinas et al. estimates
+      #Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe,Nrnd.MNe) # excluding Zhu et al. (2021) estimate
+      #Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe) # excluding Zhu et al. (2021) and Malaspinas et al. estimates
       Nmn.boot <- median(Nrnd.all, na.rm=T)
       Nsd.boot <- sd(Nrnd.all, na.rm=T)
       Nmn.boot + Nsd.boot
       Nmn.boot - Nsd.boot
       Nlo.boot <- quantile(Nrnd.all, probs=0.125, na.rm=T) # lower 75th %ile
       Nup.boot <- quantile(Nrnd.all, probs=0.875, na.rm=T) # upper 75th %ile
-      print(c(Nlo.boot, Nmn.boot, Nup.boot))
       
       NmedBS <- bootstrap(Nrnd.all, biter, theta=mean)$thetastar
       NmedBS.up <- quantile(NmedBS, probs=0.125, na.rm=T)
       NmedBS.lo <- quantile(NmedBS, probs=0.875, na.rm=T)
       NmedBS.md <- mean(NmedBS)
-      print(c(NmedBS.lo, NmedBS.md, NmedBS.up))
+      print("population range")
+      print(c(Nlo.boot, NmedBS.md, Nup.boot))
       
 area.aus <- 7688287 # km2
-print(c(NmedBS.lo/area.aus, NmedBS.md/area.aus, NmedBS.up/area.aus))
+print("density range")
+print(c(Nlo.boot/area.aus, NmedBS.md/area.aus, Nup.boot/area.aus))
 
       
 ##########################################
@@ -3399,7 +3832,7 @@ years.ahead <- seq(1,30)
 N.proj <- round(census.dat$N[len.census.dat]*exp(census.r.mn*years.ahead), 0)
 years.fut <- 2021+years.ahead
 plot(years.fut, N.proj, type="l")
-abline(h=2510000, lty=2, col="red")
-target.N <- years.fut[which.min(abs(N.proj - 2510000))]
+abline(h=2210000, lty=2, col="red")
+target.N <- years.fut[which.min(abs(N.proj - 2210000))]
 target.N
 abline(v=target.N, lty=2, col="red")
