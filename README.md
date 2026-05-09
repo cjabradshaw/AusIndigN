@@ -15,7 +15,7 @@ R code by Corey Bradshaw (<a href="http://github.com/cjabradshaw">@cjabradshaw</
 
 ### <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/scripts">base script</a>
 - <code>indigN.R</code>: includes all code used to derive estimates reported in the paper mentioned above
-- <code>HGpopdensR</code>: this is a separate repository that estimates population size using a different technique by <a href="http://doi.org/10.1038/s41559-021-01548-3">Zhu <em>et al</em></a>. (2021)
+- <a href="https://github.com/cjabradshaw/HGpopdensR"><code>HGpopdensR</code></a>: this is a separate repository that estimates population size using a different technique by <a href="http://doi.org/10.1038/s41559-021-01548-3">Zhu <em>et al</em></a>. (2021)
 
 ### <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/scripts/source">source functions</a>
 - <code>matrixOperators.r</code>: functions for manipulating matrices for population projections
