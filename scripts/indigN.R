@@ -3835,7 +3835,7 @@ years.ahead <- seq(1,30)
 N.proj <- round(census.dat$N[len.census.dat]*exp(census.r.mn*years.ahead), 0)
 years.fut <- 2021+years.ahead
 plot(years.fut, N.proj, type="l")
-abline(h=2210000, lty=2, col="red")
+abline(h=2220000, lty=2, col="red")
 target.N <- years.fut[which.min(abs(N.proj - 2210000))]
 target.N
 abline(v=target.N, lty=2, col="red")
