@@ -2988,6 +2988,9 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       n.up <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.975, na.rm=T) # upper over all iterations
       n.lo <- apply(n.sums.mat, MARGIN=2, quantile, probs=0.025, na.rm=T) # lower over all iterations
       
+      ## export n.md*2
+      write.csv(data.frame(year=yrs, N=n.md*2), file="NmdOut2.22M.csv", row.names=F)
+      
       plot(yrs,n.md,type="l", main = "", xlab="year", ylab="N", lwd=2, ylim=c(0.95*min(n.lo, na.rm=T),1.05*max(n.up, na.rm=T)))
       lines(yrs,n.lo,lty=2,col="red",lwd=1.5)
       lines(yrs,n.up,lty=2,col="red",lwd=1.5)
@@ -3795,8 +3798,8 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       Nrnd.TNe <- round(rnorm(biter, mean=Nmd.TNe, sd=Nse.TNe), 0)
       Nrnd.MNe <- round(rnorm(biter, mean=Nmd.MNe, sd=Nse.MNe), 0)
       
-      Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe,Nrnd.MNe) # including Zhu et al. (2021) estimate
-      #Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe) # including Zhu et al. (2021) & excluding Malaspinas et al. estimates
+      #Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe,Nrnd.MNe) # including Zhu et al. (2021) estimate
+      Nrnd.all <- c(Nrnd.npp,Nrnd.Zhu,Nrnd.14C,Nrnd.TNe) # including Zhu et al. (2021) & excluding Malaspinas et al. estimates
       #Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe,Nrnd.MNe) # excluding Zhu et al. (2021) estimate
       #Nrnd.all <- c(Nrnd.npp,Nrnd.14C,Nrnd.TNe) # excluding Zhu et al. (2021) and Malaspinas et al. estimates
       Nmn.boot <- median(Nrnd.all, na.rm=T)
