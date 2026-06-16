@@ -1,6 +1,6 @@
 #########################################################################
 ## Estimating size of pre-colonial Indigenous population in Australia  ##
-## August 2024 / updated May 2026                                                         ##
+## August 2024 / updated June 2026                                     ##
 ## CJA Bradshaw                                                        ##
 #########################################################################
 
