@@ -7,28 +7,21 @@
 <a href="https://au.linkedin.com/in/alan-williams-7973a958">Williams, AN</a>, <a href="https://evolutionofculturaldiversity.anu.edu.au/our-people/ray-tobler/">R Tobler</a>, <a href="https://experts.deakin.edu.au/42085-billy-griffiths">B Griffiths</a>, <a href="https://portfolio.jcu.edu.au/researchers/sean.ulm/">S Ulm</a>, <a href="https://www.flinders.edu.au/people/cody.nitschke">MC Nitschke</a>, <a href="https://portfolio.jcu.edu.au/researchers/michael.bird">MI Bird</a>, <a href="https://scholars.uow.edu.au/shane-ingrey">S Ingrey</a>, <a href="https://www.flinders.edu.au/people/frederik.saltre">F Saltré</a>, <a href="https://www.facebook.com/profile.php?id=100076324899510">K Beller</a>, <a href="https://research.monash.edu/en/persons/ian-mcniven">IJ McNiven</a>, <a href="https://au.linkedin.com/in/nick-pitt-772440ba">N Pitt</a>, <a href="https://research.monash.edu/en/persons/lynette-russell-am">L Russell</a>, <a href="https://research-repository.uwa.edu.au/en/persons/alistair-paterson/">A Paterson</a>, <a href="https://discover.utas.edu.au/Christopher.Wilson">C Wilson</a>, <a href="https://www.flinders.edu.au/people/corey.bradshaw">CJA Bradshaw</a>. <a href="">Large size of the Australian Indigenous population prior to its massive decline following colonial invasion</a>. <em>Nature Human Behaviour</em> In review
 
 ## Abstract
-Estimating the size of Indigenous populations in Australia prior to European colonial invasion is essential to truth-telling and reconciliation. Robust estimates of the population dynamics of pre-colonial Indigenous Australians are poor due to lethal diseases, frontier and structural violence, and no systematic censuses. We review ethnographic observations, archaeological and genetic reconstructions, and modelled carrying capacity, to infer Indigenous population size prior to colonial invasion. Congruency of the modelled (not historical or ethnographic accounts) estimates suggests a bootstrapped pre-colonial median of 2.22 million, or 0.29 people km<sup>-2</sup>. This allows an estimate of the number of excess deaths in the post-colonial era. For a median pre-colonial population of 2.2 million, ~ 28,200 excess deaths year-1 (2.06 million deaths in total) would have had to occur over the late 18<sup>th</sup> and early 19<sup>th</sup> Centuries from colonial invasion-related mortality to align with census records. These findings highlight the major impacts of invasion experienced by Indigenous Australians, and demonstrate their remarkable survival, resilience, and recovery over recent centuries.
+Estimating the size of Indigenous populations in Australia prior to European colonial invasion is essential to truth-telling and reconciliation. Robust estimates of the population dynamics of pre-colonial Indigenous Australians are poor due to lethal diseases, frontier and structural violence, and absence of systematic censuses. We review ethnographic observations, archaeological and genetic reconstructions, and modelled carrying capacity to infer Indigenous population size prior to colonial invasion. Congruency of the modelled and genetics-based (not historical or ethnographic accounts) estimates suggests a bootstrapped pre-colonial median of 2.22 million, or 0.29 people km<sup>-2</sup>. This allows an estimate of the number of excess deaths in the post-colonial era. For a median pre-colonial population of 2.22 million, ~ 28,200 excess deaths year<sup>-1</sup> (2.06 million deaths in total) would have had to occur over the late 18<sup>th</sup> and early 19<sup>th</sup> Centuries from colonial invasion-related mortality to align with census records. These findings highlight the major impacts of invasion experienced by Indigenous Australians, and demonstrate their remarkable survival, resilience, and recovery over the last century. We warn readers that the content of this study is confronting and possibly distressing.
 
+## Repository components
+- <code>scripts/indigN.R</code>: main analysis script for carrying-capacity estimation, comparison with Binford densities, boosted regression tree (BRT) and generalised addtive model (GAM) fitting, spatially thinned resampling, and demographic back-casting.
+- <code>scripts/source/</code>: supporting functions for matrix population models, information-theoretic model comparison, and R-squared calculations.
+- <code>data/</code>: core model inputs, including Sahul NPP, life-table data, Binford overlays, and rainfall rasters used to define wet-only subsets.
+- <code>out/</code>: generated tables and figures, including BRT/GAM outputs for all points and wet-only points, Moran correlograms, and distance-labelled spatial resampling summaries.
 
-## <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/scripts">Scripts</a>
-R code by Corey Bradshaw (<a href="http://github.com/cjabradshaw">@cjabradshaw</a>)
+## Main inputs
+- <em>NppSahul(0-140ka_rawvalues)_Krapp2021.csv.zip</em>: hindcasted Sahul net primary production from <a href="http://doi.org/10.1038/s41597-021-01009-3">Krapp et al.</a>
+- <em>world2013lifetable.csv</em>: age-specific human life-table values from <a href="http://doi.org/10.1073/pnas.1410465111">Bradshaw & Brook</a>
+- <em>bindensModelOverlay.csv</em>: Binford density estimates overlaid on modelled carrying capacity
 
-### <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/scripts">base script</a>
-- <code>indigN.R</code>: includes all code used to derive estimates reported in the paper mentioned above
-- <a href="https://github.com/cjabradshaw/HGpopdensR"><code>HGpopdensR</code></a>: this is a separate repository that estimates population size using a different technique by <a href="http://doi.org/10.1038/s41559-021-01548-3">Zhu <em>et al</em></a>. (2021)
-
-### <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/scripts/source">source functions</a>
-- <code>matrixOperators.r</code>: functions for manipulating matrices for population projections
-- <code>new_lmer_AIC_tables3.r</code>: functions to calculate information-theoretic parameters for linear models
-- <code>r.squared.r</code>: functions to calculate goodness of fit for linear models
-
-## <a href="https://github.com/cjabradshaw/AusIndigN/tree/main/data">Data</a>
-- <em>NppSahul(0-140ka_rawvalues)_Krapp2021.csv.zip</em>: hindcasted net primary production (kg C m<sup>-2</sup> year<sup>-1</sup>) for 0.5°×0.5° grid cells from 140 ka to the present for Sahul from <a href="http://doi.org/10.1038/s41597-021-01009-3">Krapp et al. (2000)</a> (unzip .csv file first)
-- <em>world2013lifetable.csv</em>: age-specific human life-table values from <a href="http://doi.org/10.1073/pnas.1410465111">Bradshaw & Brook (2014)</a>
-- <em>bindensModelOverlay.csv</em>: population estimates from <a href="https://www.ucpress.edu/books/constructing-frames-of-reference/paper">Binford (2001)</a> using R package <code>binford</code> (<a href="http://CRAN.R-project.org/package=binford">Marwick et al. 2016</a>) overlayed on carrying-capacity estimates
-
-## R libraries
-<code>abind</code>, <code>bootstrap</code>, <code>binford</code>, <code>dismo</code>, <code>gbm</code>, <code>ggplot2</code>, <code>ncdf4</code>, <code>oceanmap</code>, <code>OceanView</code>, <code>performance</code>, <code>pracma</code>, <code>raster</code>, <code>rgl</code>, <code>sp</code>, <code>scatterplot3d</code>,  <code>spatialEco</code>, <code>sjPlot</code>, <code>SpatialPack</code>, <code>spatstat</code>, <code>terra</code>, <code>truncnorm</code>
+## Related repository
+- <a href="https://github.com/cjabradshaw/HGpopdensR"><code>HGpopdensR</code></a>: separate codebase for the alternative population-size approach based on <a href="http://doi.org/10.1038/s41559-021-01548-3">Zhu <em>et al.</em></a> (2021)
 
 
 ### Acknowledgements
