@@ -715,6 +715,75 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     CV.cor.se <- 100 * brt.fit$cv.statistics$correlation.se
     print(c(CV.cor, CV.cor.se))
     
+    ########################################
+    # generalised additive model analogue ##
+    ########################################
+    DratioM2B.sc.center <- as.numeric(attr(bindensModOverl$DratioM2B.sc, "scaled:center"))
+    DratioM2B.sc.scale <- as.numeric(attr(bindensModOverl$DratioM2B.sc, "scaled:scale"))
+    
+    gam.fit <- mgcv::gam(
+      DratioM2B.sc ~
+        s(year, k = 10) +
+        s(lat, k = 10),
+      data = bindensModOverl,
+      family = gaussian(),
+      method = "REML"
+    )
+    summary(gam.fit)
+    mgcv::gam.check(gam.fit)
+    
+    back.transform.Dratio <- function(x) {
+      (x * DratioM2B.sc.scale) + DratioM2B.sc.center
+    }
+    
+    mean.year <- mean(bindensModOverl$year, na.rm=T)
+    mean.lat <- mean(bindensModOverl$lat, na.rm=T)
+    
+    gam.year.grid <- data.frame(
+      year = seq(min(bindensModOverl$year, na.rm=T), max(bindensModOverl$year, na.rm=T), length.out=100),
+      lat = mean.lat
+    )
+    gam.lat.grid <- data.frame(
+      year = mean.year,
+      lat = seq(min(bindensModOverl$lat, na.rm=T), max(bindensModOverl$lat, na.rm=T), length.out=100)
+    )
+    
+    gam.year.pred <- predict(gam.fit, newdata = gam.year.grid, type = "response", se.fit = TRUE)
+    gam.lat.pred <- predict(gam.fit, newdata = gam.lat.grid, type = "response", se.fit = TRUE)
+    
+    gam.year.fit <- back.transform.Dratio(as.numeric(gam.year.pred$fit))
+    gam.year.lo <- back.transform.Dratio(as.numeric(gam.year.pred$fit - 1.96 * gam.year.pred$se.fit))
+    gam.year.up <- back.transform.Dratio(as.numeric(gam.year.pred$fit + 1.96 * gam.year.pred$se.fit))
+    
+    gam.lat.fit <- back.transform.Dratio(as.numeric(gam.lat.pred$fit))
+    gam.lat.lo <- back.transform.Dratio(as.numeric(gam.lat.pred$fit - 1.96 * gam.lat.pred$se.fit))
+    gam.lat.up <- back.transform.Dratio(as.numeric(gam.lat.pred$fit + 1.96 * gam.lat.pred$se.fit))
+    
+    par(mfrow=c(1,2))
+    plot(gam.lat.grid$lat, gam.lat.fit, type="l", xlab="lat", ylab="model D:Binford D",
+         ylim=c(min(gam.lat.lo, na.rm=T), max(gam.lat.up, na.rm=T)))
+    lines(gam.lat.grid$lat, gam.lat.lo, lty=2, col="red")
+    lines(gam.lat.grid$lat, gam.lat.up, lty=2, col="red")
+    plot(gam.year.grid$year, gam.year.fit, type="l", xlab="year", ylab="model D:Binford D",
+         ylim=c(min(gam.year.lo, na.rm=T), max(gam.year.up, na.rm=T)))
+    lines(gam.year.grid$year, gam.year.lo, lty=2, col="red")
+    lines(gam.year.grid$year, gam.year.up, lty=2, col="red")
+    par(mfrow=c(1,1))
+    
+    GAMmodDBinD.dat <- data.frame(
+      "latx"=gam.lat.grid$lat,
+      "laty"=gam.lat.fit,
+      "laty.lo"=gam.lat.lo,
+      "laty.up"=gam.lat.up,
+      "yearx"=gam.year.grid$year,
+      "yeary"=gam.year.fit,
+      "yeary.lo"=gam.year.lo,
+      "yeary.up"=gam.year.up
+    )
+    write.table(GAMmodDBinD.dat, "GAMmodDBinD.csv", sep=",", row.names = F)
+    print(c(summary(gam.fit)$r.sq, summary(gam.fit)$dev.expl))
+    
+    
     ####################################
     ## remove arid and semi-arid points
     ## rainfall data
@@ -804,101 +873,102 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
     CV.cor.se.wet <- 100 * brt.fit.wet$cv.statistics$correlation.se
     print(c(CV.cor.wet, CV.cor.se.wet))
     
+    # GAM analogue after removing arid and semi-arid points
+    gam.fit.wet <- mgcv::gam(
+      DratioM2B.sc ~
+        s(year, k = 10) +
+        s(lat, k = 10),
+      data = bindensModOverl.wet,
+      family = gaussian(),
+      method = "REML"
+    )
+    summary(gam.fit.wet)
+    mgcv::gam.check(gam.fit.wet)
+    
+    mean.year.wet <- mean(bindensModOverl.wet$year, na.rm=T)
+    mean.lat.wet <- mean(bindensModOverl.wet$lat, na.rm=T)
+    
+    gam.year.grid.wet <- data.frame(
+      year = seq(min(bindensModOverl.wet$year, na.rm=T), max(bindensModOverl.wet$year, na.rm=T), length.out=100),
+      lat = mean.lat.wet
+    )
+    gam.lat.grid.wet <- data.frame(
+      year = mean.year.wet,
+      lat = seq(min(bindensModOverl.wet$lat, na.rm=T), max(bindensModOverl.wet$lat, na.rm=T), length.out=100)
+    )
+    
+    gam.year.pred.wet <- predict(gam.fit.wet, newdata = gam.year.grid.wet, type = "response", se.fit = TRUE)
+    gam.lat.pred.wet <- predict(gam.fit.wet, newdata = gam.lat.grid.wet, type = "response", se.fit = TRUE)
+    
+    gam.year.fit.wet <- back.transform.Dratio(as.numeric(gam.year.pred.wet$fit))
+    gam.year.lo.wet <- back.transform.Dratio(as.numeric(gam.year.pred.wet$fit - 1.96 * gam.year.pred.wet$se.fit))
+    gam.year.up.wet <- back.transform.Dratio(as.numeric(gam.year.pred.wet$fit + 1.96 * gam.year.pred.wet$se.fit))
+    
+    gam.lat.fit.wet <- back.transform.Dratio(as.numeric(gam.lat.pred.wet$fit))
+    gam.lat.lo.wet <- back.transform.Dratio(as.numeric(gam.lat.pred.wet$fit - 1.96 * gam.lat.pred.wet$se.fit))
+    gam.lat.up.wet <- back.transform.Dratio(as.numeric(gam.lat.pred.wet$fit + 1.96 * gam.lat.pred.wet$se.fit))
+    
+    par(mfrow=c(1,2))
+    plot(gam.lat.grid.wet$lat, gam.lat.fit.wet, type="l", xlab="lat", ylab="model D:Binford D",
+         ylim=c(min(gam.lat.lo.wet, na.rm=T), max(gam.lat.up.wet, na.rm=T)))
+    lines(gam.lat.grid.wet$lat, gam.lat.lo.wet, lty=2, col="red")
+    lines(gam.lat.grid.wet$lat, gam.lat.up.wet, lty=2, col="red")
+    plot(gam.year.grid.wet$year, gam.year.fit.wet, type="l", xlab="year", ylab="model D:Binford D",
+         ylim=c(min(gam.year.lo.wet, na.rm=T), max(gam.year.up.wet, na.rm=T)))
+    lines(gam.year.grid.wet$year, gam.year.lo.wet, lty=2, col="red")
+    lines(gam.year.grid.wet$year, gam.year.up.wet, lty=2, col="red")
+    par(mfrow=c(1,1))
+    
+    GAMmodDBinDwet.dat <- data.frame(
+      "latx"=gam.lat.grid.wet$lat,
+      "laty"=gam.lat.fit.wet,
+      "laty.lo"=gam.lat.lo.wet,
+      "laty.up"=gam.lat.up.wet,
+      "yearx"=gam.year.grid.wet$year,
+      "yeary"=gam.year.fit.wet,
+      "yeary.lo"=gam.year.lo.wet,
+      "yeary.up"=gam.year.up.wet
+    )
+    write.table(GAMmodDBinDwet.dat, "GAMmodDBinDwet.csv", sep=",", row.names = F)
+    print(c(summary(gam.fit.wet)$r.sq, summary(gam.fit.wet)$dev.expl))
+    
+    
+    
     
     ## add stochastic spatial resampling procedure to reduce impact of spatial autocorrelation
-    ## ensure that no two points are within 100 km of each other in each resampled dataset;
+    ## ensure that no two points are within the minimum thinning distance in each resampled dataset;
     ## repeat 100 times; fit BRT to each resampled dataset;
     ## extract variable importance and partial dependence plots for each resampled dataset;
     ## calculate mean and SE of variable importance and partial dependence across resampled dataset
 
-    #coords <- as.matrix(bindensModOverl[, c("lon", "lat")])
-    coords <- as.matrix(bindensModOverl.wet[, c("lon", "lat")])
-
-    # -----------------------------------------------------------
-    # Moran's I correlogram to determine appropriate min.dist
-    # Tests raw response and BRT residuals across 100-km bands
-    # min.dist is set to the lag of peak significant autocorrelation
-    # in the raw response correlogram
-    # -----------------------------------------------------------
-    dist_mat <- sp::spDists(coords, longlat = TRUE)   # pairwise great-circle distances (km)
-
-    #y_raw   <- as.numeric(scale(bindensModOverl$DratioM2B.sc))
-    #y_resid <- as.numeric(
-    #  scale(bindensModOverl$DratioM2B.sc -
-    #          predict(brt.fit, bindensModOverl, n.trees = brt.fit$n.trees))
-    #)
-
-    y_raw   <- as.numeric(scale(bindensModOverl.wet$DratioM2B.sc))
-    y_resid <- as.numeric(
-      scale(bindensModOverl.wet$DratioM2B.sc -
-              predict(brt.fit.wet, bindensModOverl.wet, n.trees = brt.fit.wet$n.trees))
-    )
-    
-    
-    moran_corr <- function(y, dist_mat, breaks) {
+    moran_corr <- function(y, dist_mat, breaks, nsim = 199L, min_pairs = 10L, min_nodes = 8L) {
       results <- data.frame(
         lag_mid = (breaks[-length(breaks)] + breaks[-1]) / 2,
         moran_I = NA_real_,
         p_value = NA_real_,
-        n_pairs = NA_integer_
+        n_pairs = NA_integer_,
+        n_nodes = NA_integer_
       )
       for (i in seq_len(nrow(results))) {
         lo    <- breaks[i];   hi <- breaks[i + 1]
         w_mat <- ((dist_mat > lo) & (dist_mat <= hi)) * 1L
         diag(w_mat) <- 0L
         results$n_pairs[i] <- sum(w_mat) / 2L
-        if (sum(w_mat) == 0) next
-        w_list <- spdep::mat2listw(w_mat, style = "W", zero.policy = TRUE)
+        if (results$n_pairs[i] < min_pairs) next
+        w_list <- spdep::mat2listw(w_mat, style = "B", zero.policy = TRUE)
+        results$n_nodes[i] <- sum(spdep::card(w_list$neighbours) > 0L)
+        if (results$n_nodes[i] < min_nodes) next
         mt     <- tryCatch(
-          spdep::moran.test(y, w_list, zero.policy = TRUE, alternative = "two.sided"),
+          spdep::moran.mc(y, w_list, nsim = nsim, zero.policy = TRUE, alternative = "two.sided"),
           error = function(e) NULL
         )
         if (!is.null(mt)) {
-          results$moran_I[i] <- mt$estimate["Moran I statistic"]
+          results$moran_I[i] <- unname(mt$statistic)
           results$p_value[i] <- mt$p.value
         }
       }
       results
     }
-
-    moran.breaks  <- seq(0, 2000, by = 100)
-    mc_raw        <- moran_corr(y_raw,   dist_mat, moran.breaks)
-    mc_resid      <- moran_corr(y_resid, dist_mat, moran.breaks)
-
-    # lag of peak significant autocorrelation in the raw response → sets min.dist
-    sig_lags <- mc_raw$lag_mid[!is.na(mc_raw$p_value) & mc_raw$p_value < 0.05]
-    #min.dist  <- if (length(sig_lags) > 0) min(sig_lags) else 100   # km
-    min.dist <- 200
-    
-    cat("Moran's I correlogram – first significant lag (raw response):", min.dist, "km\n")
-    cat("setting min.dist =", min.dist, "km for spatial thinning\n\n")
-
-    # plot correlogram
-    mc_raw$series   <- "raw response"
-    mc_resid$series <- "BRT residuals"
-    mc_plot <- rbind(mc_raw, mc_resid)
-    mc_plot <- mc_plot[!is.na(mc_plot$n_pairs) & mc_plot$n_pairs > 0, ]
-    mc_plot$sig <- ifelse(mc_plot$p_value < 0.05, "p < 0.05", "p \u2265 0.05")
-
-    print(
-      ggplot(mc_plot, aes(x = lag_mid, y = moran_I)) +
-        geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
-        geom_vline(xintercept = min.dist, linetype = "dotted",
-                   colour = "steelblue", linewidth = 0.7) +
-        geom_line(colour = "grey70") +
-        geom_point(aes(fill = sig), shape = 21, size = 3) +
-        scale_fill_manual(values = c("p < 0.05" = "#d73027", "p \u2265 0.05" = "white"),
-                          name = NULL) +
-        scale_x_continuous(breaks = seq(0, 2000, 200)) +
-        facet_wrap(~series, ncol = 1) +
-        labs(x = "distance lag (km)", y = "Moran's I",
-             title = "Moran's I correlogram",
-             subtitle = paste0("dotted line = min.dist (", min.dist, " km)")) +
-        theme_bw(base_size = 12) +
-        theme(legend.position = "bottom")
-    )
-
-    
     n.resamp   <- 100
     pd.grid.n  <- 100    # resolution for partial dependence grids
     n.min      <- 10     # minimum thinned obs to attempt BRT
@@ -947,35 +1017,50 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
       }),
       brt.fit.wet$var.names
     )
+    gam.var.names <- c("year", "lat")
+    gam.xgrid <- setNames(
+      lapply(gam.var.names, function(v) {
+        r <- range(bindensModOverl.wet[[v]], na.rm = TRUE)
+        seq(r[1], r[2], length.out = pd.grid.n)
+      }),
+      gam.var.names
+    )
     
     # storage
-    var.imp.mat <- matrix(NA, n.resamp, length(brt.fit$var.names),
-                          dimnames = list(NULL, brt.fit$var.names))
+    var.imp.mat <- matrix(NA, n.resamp, length(brt.fit.wet$var.names),
+                          dimnames = list(NULL, brt.fit.wet$var.names))
     
     pd.list <- setNames(
-     lapply(brt.fit$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
-     brt.fit$var.names
+     lapply(brt.fit.wet$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+     brt.fit.wet$var.names
+    )
+    gam.pd.list <- setNames(
+      lapply(gam.var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+      gam.var.names
     )
     n.obs.vec <- integer(n.resamp)
     
     # -----------------------------------------------------------
     # adaptive BRT: iterates lr large→small, stopping at the
-    # first value that places n.trees in [target.min, max.trees*0.95]
+    # first value that places n.trees in [target.min, max.trees*0.9]
     # (largest lr in target range = fewest trees = max efficiency).
     # step.size, tolerance, and n.minobsinnode are scaled to dataset size.
     # Uses gbm.step.patched to forward n.minobsinnode correctly.
     # -----------------------------------------------------------
     adaptive_brt <- function(dat, gbm.x, gbm.y,
                              tree.complexity, bag.fraction,
-                             n.folds         = 10,
-                             max.trees       = 50000,
-                             target.min      = 1000,
-                             lr.candidates   = c(0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001)) {
+                             n.folds         = NULL,
+                             max.trees       = 8000,
+                             target.min      = 300,
+                             lr.candidates   = c(0.05, 0.02, 0.01)) {
       n         <- nrow(dat)
+      if (is.null(n.folds)) {
+        n.folds <- max(3L, min(5L, floor(n / 4L)))
+      }
       # larger step.size for larger n: coarser CV steps, faster convergence
       step.size <- max(5L, round(n / 2L))
       # loosen tolerance for small n where CV loss is noisier
-      tolerance <- 0.001 * sqrt(30 / n)
+      tolerance <- 0.002 * sqrt(30 / n)
       # scale n.minobsinnode to satisfy: nTrain * bag.fraction > 2 * n.minobsinnode + 1
       n.train   <- floor(n * (n.folds - 1L) / n.folds)
       n.minobs  <- max(2L, floor((n.train * bag.fraction - 2) / 2) - 1L)
@@ -1003,138 +1088,61 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
           )),
           error = function(e) NULL
         )
+        
+        if (is.null(fit_try) || is.null(fit_try$n.trees)) next
 
-        if (!is.null(fit_try)) {
-          nt         <- fit_try$n.trees
-          best.fit   <- fit_try
-          params.log <- list(lr             = lr,
-                             step.size      = step.size,
-                             tolerance      = round(tolerance, 6),
-                             n.minobsinnode = n.minobs,
-                             n.trees        = nt)
-          # accept: enough trees and didn't hit the ceiling
-          if (nt >= target.min && nt < max.trees * 0.95) break
-        }
+        nt <- fit_try$n.trees
+        if (!is.finite(nt) || length(nt) != 1L) next
+        
+        best.fit   <- fit_try
+        params.log <- list(lr             = lr,
+                           n.folds        = n.folds,
+                           step.size      = step.size,
+                           tolerance      = round(tolerance, 6),
+                           n.minobsinnode = n.minobs,
+                           n.trees        = nt)
+        # accept: enough trees and didn't hit the ceiling
+        if (nt >= target.min && nt < max.trees * 0.9) break
       }
 
       list(fit = best.fit, params = params.log)
     }
-
-    # storage
-    params.log.list <- vector("list", n.resamp)
-    cv.cor.vec      <- rep(NA_real_, n.resamp)   # CV correlation (mean across folds)
-    cv.cor.se.vec   <- rep(NA_real_, n.resamp)   # CV correlation SE
-    cv.dev.vec      <- rep(NA_real_, n.resamp)   # CV deviance (mean across folds)
-    cv.dev.se.vec   <- rep(NA_real_, n.resamp)   # CV deviance SE
-
-    set.seed(7421)
-
-    for (iter in seq_len(n.resamp)) {
-    #  thin_dat            <- spatial_thin(bindensModOverl, coords, min.dist)
-      thin_dat            <- spatial_thin(bindensModOverl.wet, coords, min.dist)
-      n.obs.vec[iter]     <- nrow(thin_dat)
-
-      if (nrow(thin_dat) < n.min) next
-
-      res_iter                <- adaptive_brt(thin_dat,
-                                              gbm.x           = match(brt.fit.wet$var.names, names(thin_dat)),
-                                              gbm.y           = match("DratioM2B.sc",    names(thin_dat)),
-                                              tree.complexity = 2,
-                                              bag.fraction    = 0.75)
-      fit_iter                <- res_iter$fit
-      params.log.list[[iter]] <- res_iter$params
-
-      if (!is.null(fit_iter)) {
-        vi <- summary(fit_iter, plotit = FALSE)
-        var.imp.mat[iter, vi$var] <- vi$rel.inf
-
-        for (v in brt.fit$var.names) {
-          pd <- plot.gbm(fit_iter, i.var = v,
-                         continuous.resolution = pd.grid.n, return.grid = TRUE)
-          pd.list[[v]][iter, ] <- approx(pd[, 1], pd[, 2],
-                                          xout = pd.xgrid[[v]], rule = 2)$y
-        }
-
-        # retain CV statistics for this resample
-        cv.cor.vec[iter]    <- fit_iter$cv.statistics$correlation.mean
-        cv.cor.se.vec[iter] <- fit_iter$cv.statistics$correlation.se
-        cv.dev.vec[iter]    <- fit_iter$cv.statistics$deviance.mean
-        cv.dev.se.vec[iter] <- fit_iter$cv.statistics$deviance.se
-      }
-
-      if (iter %% 10 == 0) {
-        p <- params.log.list[[iter]]
-        if (!is.null(p)) {
-          cat(sprintf("resample %3d / %d | n = %2d | lr = %.4f | trees = %d | CV.cor = %.3f\n",
-                      iter, n.resamp, nrow(thin_dat), p$lr, p$n.trees,
-                      cv.cor.vec[iter]))
-        } else {
-          cat(sprintf("resample %3d / %d | n = %2d | fit failed\n", iter, n.resamp, nrow(thin_dat)))
-        }
-      }
+    
+    gam_pd_curve <- function(fit, xgrid, focal_var, year_fixed, lat_fixed) {
+      newdat <- data.frame(
+        year = rep(year_fixed, length(xgrid)),
+        lat = rep(lat_fixed, length(xgrid))
+      )
+      newdat[[focal_var]] <- xgrid
+      as.numeric(predict(fit, newdata = newdat, type = "response"))
+    }
+    
+    adaptive_gam <- function(dat, k.max = 10L) {
+      year_unique <- length(unique(dat$year))
+      lat_unique <- length(unique(dat$lat))
+      if (year_unique < 4L || lat_unique < 4L) return(NULL)
+      
+      k.year <- min(k.max, year_unique - 1L)
+      k.lat <- min(k.max, lat_unique - 1L)
+      
+      tryCatch(
+        suppressWarnings(
+          mgcv::gam(
+            DratioM2B.sc ~
+              s(year, k = k.year) +
+              s(lat, k = k.lat),
+            data = dat,
+            family = gaussian(),
+            method = "REML"
+          )
+        ),
+        error = function(e) NULL
+      )
     }
 
-    cat("\ndone.\n")
-    cat("obs per resample  – mean:", round(mean(n.obs.vec), 1),
-        " range:", range(n.obs.vec)[1], "-", range(n.obs.vec)[2], "\n")
-    cat("valid BRT fits    :", sum(!is.na(var.imp.mat[, 1])), "/", n.resamp, "\n")
-
-    # summary of adaptive parameters and CV statistics across resamples
-    params.df <- do.call(rbind, lapply(seq_len(n.resamp), function(r) {
-      p <- params.log.list[[r]]
-      if (is.null(p)) return(data.frame(resamp      = r,
-                                        n.obs       = n.obs.vec[r],
-                                        lr          = NA, step.size = NA,
-                                        tolerance   = NA, n.trees   = NA,
-                                        cv.cor      = NA, cv.cor.se = NA,
-                                        cv.dev      = NA, cv.dev.se = NA))
-      data.frame(resamp      = r,
-                 n.obs       = n.obs.vec[r],
-                 lr          = p$lr,
-                 step.size   = p$step.size,
-                 tolerance   = p$tolerance,
-                 n.trees     = p$n.trees,
-                 cv.cor      = cv.cor.vec[r],
-                 cv.cor.se   = cv.cor.se.vec[r],
-                 cv.dev      = cv.dev.vec[r],
-                 cv.dev.se   = cv.dev.se.vec[r])
-    }))
-    cat("\nAdaptive parameter summary:\n")
-    print(table(lr = params.df$lr))
-    cat("median n.trees:", median(params.df$n.trees, na.rm=TRUE), "\n")
-
-    cat("\nCV performance across resamples:\n")
-    cat(sprintf("  CV correlation – mean: %.3f  SE: %.4f  range: [%.3f, %.3f]\n",
-                mean(params.df$cv.cor, na.rm=TRUE),
-                sd(params.df$cv.cor,   na.rm=TRUE) / sqrt(sum(!is.na(params.df$cv.cor))),
-                min(params.df$cv.cor,  na.rm=TRUE),
-                max(params.df$cv.cor,  na.rm=TRUE)))
-    cat(sprintf("  CV deviance   – mean: %.3f  SE: %.4f\n",
-                mean(params.df$cv.dev, na.rm=TRUE),
-                sd(params.df$cv.dev,   na.rm=TRUE) / sqrt(sum(!is.na(params.df$cv.dev)))))
-
-    ## --- summarise variable importance across resamples ---
-    vi.mean <- colMeans(var.imp.mat, na.rm = TRUE)
-    vi.se   <- apply(var.imp.mat, 2, function(x) sd(x, na.rm=TRUE) / sqrt(sum(!is.na(x))))
-    vi.summary <- data.frame(variable     = names(vi.mean),
-                             mean.rel.inf = vi.mean,
-                             se.rel.inf   = vi.se)
-    print(vi.summary)
-
-    ## --- summarise partial dependence across resamples ---
-    pd.summary <- setNames(
-      lapply(brt.fit$var.names, function(v) {
-          m <- pd.list[[v]]
-        data.frame(x      = pd.xgrid[[v]],
-                   mean.y = colMeans(m, na.rm = TRUE),
-                   se.y   = apply(m, 2, function(col)
-                     sd(col, na.rm=TRUE) / sqrt(sum(!is.na(col)))))
-      }),
-      brt.fit$var.names
-    )
-    
     sc_scale  <- attr(bindensModOverl$DratioM2B.sc, "scaled:scale")
     sc_center <- attr(bindensModOverl$DratioM2B.sc, "scaled:center")
+    out_dir <- "/Users/brad0317/Documents/GitHub/AusIndigN/out/"
     
     # back-transform helper: standardised PD → original DratioM2B units
     bt <- function(x) x * sc_scale + sc_center
@@ -1151,61 +1159,403 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
         )
       }))
     }
-    
-    #pd100  <- pd_summary_df(pd.list.100, pd.xgrid, brt.fit$var.names, "100 km (resampled)")
-    #pd250  <- pd_summary_df(pd.list, pd.xgrid, brt.fit$var.names, "250 km (resampled)")
-    pd100.wet  <- pd_summary_df(pd.list, pd.xgrid, brt.fit.wet$var.names, "100 km (resampled)")
-    # save to .csv
-    write.csv(pd100.wet, "pdwet.csv", row.names = FALSE)
-        
-    pd_orig <- do.call(rbind, lapply(brt.fit$var.names, function(v) {
-      raw <- plot.gbm(brt.fit, i.var = v, continuous.resolution = 200, return.grid = TRUE)
-      data.frame(
-        variable = v,
-        run      = "full-data BRT",
-        x        = pd.xgrid[[v]],
-        mean.y   = bt(approx(raw[, 1], raw[, 2], xout = pd.xgrid[[v]], rule = 2)$y),
-        se.y     = 0
-      )
-    }))
-    
-    pd_all <- rbind(pd100, pd250, pd_orig)
-    pd_all$run <- factor(pd_all$run,
-                         levels = c("full-data BRT", "100 km (resampled)", "250 km (resampled)"))
-    pd_all$var_label <- ifelse(pd_all$variable == "year", "Year", "Latitude (°)")
-    
-    ggplot(pd_all, aes(x = x, y = mean.y, colour = run, fill = run)) +
-      geom_ribbon(data  = subset(pd_all, run != "full-data BRT"),
-                  aes(ymin = mean.y - se.y, ymax = mean.y + se.y),
-                  alpha = 0.15, colour = NA) +
-      geom_line(aes(linewidth = run == "full-data BRT")) +
-      scale_linewidth_manual(values = c(`TRUE` = 1.1, `FALSE` = 0.75), guide = "none") +
-      scale_colour_manual(values = c("full-data BRT"      = "black",
-                                     "100 km (resampled)" = "#e07b54",
-                                     "250 km (resampled)" = "#4e9ac7"),
-                          name = NULL) +
-      scale_fill_manual(values   = c("full-data BRT"      = NA,
-                                     "100 km (resampled)" = "#e07b54",
-                                     "250 km (resampled)" = "#4e9ac7"),
-                        name = NULL) +
-      facet_wrap(~var_label, scales = "free_x", ncol = 2) +
-      labs(x    = NULL,
-           y    = expression(paste("model:Binford population density ratio (", italic(D)[ratio], ")")),
-           title = "BRT partial dependence: full-data vs. spatially resampled fits") +
-      theme_bw(base_size = 12) +
-      theme(legend.position  = "bottom",
-            strip.text       = element_text(face = "bold"))
 
-    out_dir <- "/Users/brad0317/Documents/GitHub/AusIndigN/out/"
+    gam_relative_contrib <- function(fit, dat) {
+      term_mat <- tryCatch(
+        predict(fit, newdata = dat, type = "terms"),
+        error = function(e) NULL
+      )
+      if (is.null(term_mat)) {
+        return(c(year = NA_real_, lat = NA_real_))
+      }
+      term_mat <- as.matrix(term_mat)
+      term_names <- gsub(" ", "", colnames(term_mat))
+      year_idx <- grepl("^s\\(year\\)", term_names)
+      lat_idx <- grepl("^s\\(lat\\)", term_names)
+      var_year <- if (any(year_idx)) stats::var(rowSums(term_mat[, year_idx, drop = FALSE]), na.rm = TRUE) else 0
+      var_lat <- if (any(lat_idx)) stats::var(rowSums(term_mat[, lat_idx, drop = FALSE]), na.rm = TRUE) else 0
+      total_var <- sum(c(var_year, var_lat), na.rm = TRUE)
+      if (!is.finite(total_var) || total_var <= 0) {
+        return(c(year = NA_real_, lat = NA_real_))
+      }
+      100 * c(
+        year = var_year / total_var,
+        lat = var_lat / total_var
+      )
+    }
+
+    derive_min_dist <- function(mc_raw) {
+      valid <- mc_raw[is.finite(mc_raw$lag_mid) &
+                        is.finite(mc_raw$moran_I) &
+                        is.finite(mc_raw$p_value), ]
+      
+      sig_pos <- valid[valid$p_value < 0.05 & valid$moran_I > 0, ]
+      if (nrow(sig_pos) > 0) {
+        return(min(sig_pos$lag_mid))
+      }
+      
+      pos <- valid[valid$moran_I > 0, ]
+      if (nrow(pos) > 0) {
+        return(pos$lag_mid[which.max(pos$moran_I)])
+      }
+      
+      if (nrow(valid) > 0) {
+        return(valid$lag_mid[which.max(valid$n_pairs)])
+      }
+      
+      mean(range(mc_raw$lag_mid, na.rm = TRUE))
+    }
+
+    run_resampling_suite <- function(dat, coords, brt_fit, gam_fit,
+                                     mean_year_use, mean_lat_use,
+                                     dataset_key, dataset_label) {
+      dist_mat <- sp::spDists(coords, longlat = TRUE)
+      y_raw <- as.numeric(scale(dat$DratioM2B.sc))
+      y_resid <- as.numeric(
+        scale(as.numeric(dat$DratioM2B.sc) -
+                predict(brt_fit, dat, n.trees = brt_fit$n.trees))
+      )
+      
+      moran.breaks <- seq(0, 2000, by = 100)
+      mc_raw <- moran_corr(y_raw, dist_mat, moran.breaks)
+      mc_resid <- moran_corr(y_resid, dist_mat, moran.breaks)
+      min.dist <- derive_min_dist(mc_raw)
+      resample_label <- paste0(min.dist, " km (resampled)")
+      dist_tag <- paste0(min.dist, "km")
+      
+      cat("\n", dataset_label, " Moran's I correlogram – calculated thinning distance:", min.dist, "km\n", sep = "")
+      cat("setting min.dist =", min.dist, "km for spatial thinning\n\n")
+      
+      mc_raw$series <- "raw response"
+      mc_resid$series <- "BRT residuals"
+      mc_plot <- rbind(mc_raw, mc_resid)
+      mc_plot <- mc_plot[!is.na(mc_plot$n_pairs) & mc_plot$n_pairs > 0, ]
+      mc_plot$sig <- ifelse(mc_plot$p_value < 0.05, "p < 0.05", "p \u2265 0.05")
+      
+      moran_plot <- ggplot(mc_plot, aes(x = lag_mid, y = moran_I)) +
+        geom_hline(yintercept = 0, linetype = "dashed", colour = "grey60") +
+        geom_vline(xintercept = min.dist, linetype = "dotted",
+                   colour = "steelblue", linewidth = 0.7) +
+        geom_line(colour = "grey70") +
+        geom_point(aes(fill = sig), shape = 21, size = 3) +
+        scale_fill_manual(values = c("p < 0.05" = "#d73027", "p \u2265 0.05" = "white"),
+                          name = NULL) +
+        scale_x_continuous(breaks = seq(0, 2000, 200)) +
+        facet_wrap(~series, ncol = 1) +
+        labs(x = "distance lag (km)", y = "Moran's I",
+             title = paste("Moran's I correlogram:", dataset_label),
+             subtitle = paste0("dotted line = min.dist (", min.dist, " km)")) +
+        theme_bw(base_size = 12) +
+        theme(legend.position = "bottom")
+      print(moran_plot)
+      
+      pd.xgrid <- setNames(
+        lapply(brt_fit$var.names, function(v) {
+          r <- range(dat[[v]], na.rm = TRUE)
+          seq(r[1], r[2], length.out = pd.grid.n)
+        }),
+        brt_fit$var.names
+      )
+      gam.xgrid <- setNames(
+        lapply(gam.var.names, function(v) {
+          r <- range(dat[[v]], na.rm = TRUE)
+          seq(r[1], r[2], length.out = pd.grid.n)
+        }),
+        gam.var.names
+      )
+      
+      var.imp.mat <- matrix(NA, n.resamp, length(brt_fit$var.names),
+                            dimnames = list(NULL, brt_fit$var.names))
+      pd.list <- setNames(
+        lapply(brt_fit$var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+        brt_fit$var.names
+      )
+      gam.pd.list <- setNames(
+        lapply(gam.var.names, function(v) matrix(NA, n.resamp, pd.grid.n)),
+        gam.var.names
+      )
+      n.obs.vec <- integer(n.resamp)
+      params.log.list <- vector("list", n.resamp)
+      cv.cor.vec <- rep(NA_real_, n.resamp)
+      cv.cor.se.vec <- rep(NA_real_, n.resamp)
+      cv.dev.vec <- rep(NA_real_, n.resamp)
+      cv.dev.se.vec <- rep(NA_real_, n.resamp)
+      gam.r.sq.vec <- rep(NA_real_, n.resamp)
+      gam.dev.expl.vec <- rep(NA_real_, n.resamp)
+      gam.year.rel.vec <- rep(NA_real_, n.resamp)
+      gam.lat.rel.vec <- rep(NA_real_, n.resamp)
+      iter.elapsed.vec <- rep(NA_real_, n.resamp)
+      
+      cat("Starting", dataset_label, "resampling loop\n")
+      set.seed(7421)
+      pb <- txtProgressBar(min = 0, max = n.resamp, style = 3)
+      
+      for (iter in seq_len(n.resamp)) {
+        iter.start <- proc.time()[3]
+        thin_dat <- spatial_thin(dat, coords, min.dist)
+        n.obs.vec[iter] <- nrow(thin_dat)
+        
+        if (nrow(thin_dat) < n.min) {
+          iter.elapsed.vec[iter] <- proc.time()[3] - iter.start
+          setTxtProgressBar(pb, iter)
+          next
+        }
+        
+        res_iter <- adaptive_brt(thin_dat,
+                                 gbm.x = match(brt_fit$var.names, names(thin_dat)),
+                                 gbm.y = match("DratioM2B.sc", names(thin_dat)),
+                                 tree.complexity = 2,
+                                 bag.fraction = 0.75)
+        fit_iter <- res_iter$fit
+        params.log.list[[iter]] <- res_iter$params
+        gam.fit.iter <- adaptive_gam(thin_dat)
+        
+        if (!is.null(fit_iter)) {
+          vi <- summary(fit_iter, plotit = FALSE)
+          var.imp.mat[iter, vi$var] <- vi$rel.inf
+          
+          for (v in brt_fit$var.names) {
+            pd <- plot.gbm(fit_iter, i.var = v,
+                           continuous.resolution = pd.grid.n, return.grid = TRUE)
+            pd.list[[v]][iter, ] <- approx(pd[, 1], pd[, 2],
+                                           xout = pd.xgrid[[v]], rule = 2)$y
+          }
+          
+          cv.cor.vec[iter] <- fit_iter$cv.statistics$correlation.mean
+          cv.cor.se.vec[iter] <- fit_iter$cv.statistics$correlation.se
+          cv.dev.vec[iter] <- fit_iter$cv.statistics$deviance.mean
+          cv.dev.se.vec[iter] <- fit_iter$cv.statistics$deviance.se
+        }
+        
+        if (!is.null(gam.fit.iter)) {
+          gam.summ <- summary(gam.fit.iter)
+          gam.contrib <- gam_relative_contrib(gam.fit.iter, thin_dat)
+          gam.r.sq.vec[iter] <- gam.summ$r.sq
+          gam.dev.expl.vec[iter] <- gam.summ$dev.expl
+          gam.year.rel.vec[iter] <- gam.contrib["year"]
+          gam.lat.rel.vec[iter] <- gam.contrib["lat"]
+          
+          for (v in gam.var.names) {
+            gam.pd.list[[v]][iter, ] <- gam_pd_curve(
+              fit = gam.fit.iter,
+              xgrid = gam.xgrid[[v]],
+              focal_var = v,
+              year_fixed = mean_year_use,
+              lat_fixed = mean_lat_use
+            )
+          }
+        }
+        
+        iter.elapsed.vec[iter] <- proc.time()[3] - iter.start
+        if (iter %% 10 == 0) {
+          p <- params.log.list[[iter]]
+          if (!is.null(p) && !is.null(gam.fit.iter)) {
+            cat(sprintf("%s resample %3d / %d | n = %2d | lr = %.4f | folds = %d | trees = %d | iter.sec = %.2f | CV.cor = %.3f | GAM R2 = %.3f | year = %.1f%% | lat = %.1f%%\n",
+                        dataset_label, iter, n.resamp, nrow(thin_dat), p$lr, p$n.folds, p$n.trees,
+                        iter.elapsed.vec[iter], cv.cor.vec[iter], gam.r.sq.vec[iter],
+                        gam.year.rel.vec[iter], gam.lat.rel.vec[iter]))
+          } else {
+            cat(sprintf("%s resample %3d / %d | n = %2d | iter.sec = %.2f | fit failed\n",
+                        dataset_label, iter, n.resamp, nrow(thin_dat), iter.elapsed.vec[iter]))
+          }
+        }
+        setTxtProgressBar(pb, iter)
+      }
+      close(pb)
+      
+      cat("\n", dataset_label, " resampling done.\n", sep = "")
+      cat("obs per resample  – mean:", round(mean(n.obs.vec), 1),
+          " range:", range(n.obs.vec)[1], "-", range(n.obs.vec)[2], "\n")
+      cat("valid BRT fits    :", sum(!is.na(var.imp.mat[, 1])), "/", n.resamp, "\n")
+      cat("valid GAM fits    :", sum(!is.na(gam.r.sq.vec)), "/", n.resamp, "\n")
+      
+      params.df <- do.call(rbind, lapply(seq_len(n.resamp), function(r) {
+        p <- params.log.list[[r]]
+        if (is.null(p)) return(data.frame(resamp = r,
+                                          n.obs = n.obs.vec[r],
+                                          lr = NA, n.folds = NA, step.size = NA,
+                                          tolerance = NA, n.trees = NA,
+                                          cv.cor = NA, cv.cor.se = NA,
+                                          cv.dev = NA, cv.dev.se = NA,
+                                          iter.sec = iter.elapsed.vec[r]))
+        data.frame(resamp = r,
+                   n.obs = n.obs.vec[r],
+                   lr = p$lr,
+                   n.folds = p$n.folds,
+                   step.size = p$step.size,
+                   tolerance = p$tolerance,
+                   n.trees = p$n.trees,
+                   cv.cor = cv.cor.vec[r],
+                   cv.cor.se = cv.cor.se.vec[r],
+                   cv.dev = cv.dev.vec[r],
+                   cv.dev.se = cv.dev.se.vec[r],
+                   iter.sec = iter.elapsed.vec[r])
+      }))
+      gam_resample_stats <- data.frame(
+        resamp = seq_len(n.resamp),
+        n.obs = n.obs.vec,
+        r.sq = gam.r.sq.vec,
+        dev.expl = gam.dev.expl.vec,
+        year_rel_contribution = gam.year.rel.vec,
+        lat_rel_contribution = gam.lat.rel.vec,
+        iter.sec = iter.elapsed.vec
+      )
+      gam_full_contrib <- data.frame(
+        dataset = dataset_key,
+        year_rel_contribution = gam_relative_contrib(gam_fit, dat)["year"],
+        lat_rel_contribution = gam_relative_contrib(gam_fit, dat)["lat"]
+      )
+      vi.mean <- colMeans(var.imp.mat, na.rm = TRUE)
+      vi.se <- apply(var.imp.mat, 2, function(x) sd(x, na.rm = TRUE) / sqrt(sum(!is.na(x))))
+      vi.summary <- data.frame(variable = names(vi.mean),
+                               mean.rel.inf = vi.mean,
+                               se.rel.inf = vi.se)
+      
+      brt_resampled <- pd_summary_df(pd.list, pd.xgrid, brt_fit$var.names, resample_label)
+      gam_resampled <- pd_summary_df(gam.pd.list, gam.xgrid, gam.var.names, resample_label)
+      
+      brt_orig <- do.call(rbind, lapply(brt_fit$var.names, function(v) {
+        raw <- plot.gbm(brt_fit, i.var = v, continuous.resolution = 200, return.grid = TRUE)
+        data.frame(
+          variable = v,
+          run = "full-data BRT",
+          x = pd.xgrid[[v]],
+          mean.y = bt(approx(raw[, 1], raw[, 2], xout = pd.xgrid[[v]], rule = 2)$y),
+          se.y = 0
+        )
+      }))
+      brt_pd_all <- rbind(brt_resampled, brt_orig)
+      brt_pd_all$run <- factor(brt_pd_all$run,
+                               levels = c("full-data BRT", resample_label))
+      brt_pd_all$var_label <- ifelse(brt_pd_all$variable == "year", "Year", "Latitude (°)")
+      
+      gam_orig <- do.call(rbind, lapply(gam.var.names, function(v) {
+        data.frame(
+          variable = v,
+          run = "full-data GAM",
+          x = gam.xgrid[[v]],
+          mean.y = bt(gam_pd_curve(
+            fit = gam_fit,
+            xgrid = gam.xgrid[[v]],
+            focal_var = v,
+            year_fixed = mean_year_use,
+            lat_fixed = mean_lat_use
+          )),
+          se.y = 0
+        )
+      }))
+      gam_pd_all <- rbind(gam_resampled, gam_orig)
+      gam_pd_all$run <- factor(gam_pd_all$run,
+                               levels = c("full-data GAM", resample_label))
+      gam_pd_all$var_label <- ifelse(gam_pd_all$variable == "year", "Year", "Latitude (°)")
+      
+      brt_plot <- ggplot(brt_pd_all, aes(x = x, y = mean.y, colour = run, fill = run)) +
+        geom_ribbon(data = subset(brt_pd_all, run != "full-data BRT"),
+                    aes(ymin = mean.y - se.y, ymax = mean.y + se.y),
+                    alpha = 0.15, colour = NA) +
+        geom_line(aes(linewidth = run == "full-data BRT")) +
+        scale_linewidth_manual(values = c(`TRUE` = 1.1, `FALSE` = 0.75), guide = "none") +
+        scale_colour_manual(values = c("full-data BRT" = "black",
+                                       stats::setNames("#e07b54", resample_label)),
+                            name = NULL) +
+        scale_fill_manual(values = c("full-data BRT" = NA,
+                                     stats::setNames("#e07b54", resample_label)),
+                          name = NULL) +
+        facet_wrap(~var_label, scales = "free_x", ncol = 2) +
+        labs(x = NULL,
+             y = expression(paste("model:Binford population density ratio (", italic(D)[ratio], ")")),
+             title = paste("BRT partial dependence:", dataset_label, "full-data vs. spatially resampled fits")) +
+        theme_bw(base_size = 12) +
+        theme(legend.position = "bottom",
+              strip.text = element_text(face = "bold"))
+      
+      gam_plot <- ggplot(gam_pd_all, aes(x = x, y = mean.y, colour = run, fill = run)) +
+        geom_ribbon(data = subset(gam_pd_all, run != "full-data GAM"),
+                    aes(ymin = mean.y - se.y, ymax = mean.y + se.y),
+                    alpha = 0.15, colour = NA) +
+        geom_line(aes(linewidth = run == "full-data GAM")) +
+        scale_linewidth_manual(values = c(`TRUE` = 1.1, `FALSE` = 0.75), guide = "none") +
+        scale_colour_manual(values = c("full-data GAM" = "black",
+                                       stats::setNames("#4e9ac7", resample_label)),
+                            name = NULL) +
+        scale_fill_manual(values = c("full-data GAM" = NA,
+                                     stats::setNames("#4e9ac7", resample_label)),
+                          name = NULL) +
+        facet_wrap(~var_label, scales = "free_x", ncol = 2) +
+        labs(x = NULL,
+             y = expression(paste("model:Binford population density ratio (", italic(D)[ratio], ")")),
+             title = paste("GAM partial dependence:", dataset_label, "full-data vs. spatially resampled fits")) +
+        theme_bw(base_size = 12) +
+        theme(legend.position = "bottom",
+              strip.text = element_text(face = "bold"))
+      
+      print(brt_plot)
+      print(gam_plot)
+      
+      write.csv(brt_pd_all,
+                file = file.path(out_dir, paste0("BRT_pd_", dataset_key, "_all.csv")),
+                row.names = FALSE)
+      write.csv(brt_resampled,
+                file = file.path(out_dir, paste0("BRT_pd_", dataset_key, "_", dist_tag, ".csv")),
+                row.names = FALSE)
+      write.csv(params.df,
+                file = file.path(out_dir, paste0("BRT_resample_stats_", dataset_key, ".csv")),
+                row.names = FALSE)
+      write.csv(vi.summary,
+                file = file.path(out_dir, paste0("BRT_varimp_", dataset_key, ".csv")),
+                row.names = FALSE)
+      write.csv(gam_pd_all,
+                file = file.path(out_dir, paste0("GAM_pd_", dataset_key, "_all.csv")),
+                row.names = FALSE)
+      write.csv(gam_resampled,
+                file = file.path(out_dir, paste0("GAM_pd_", dataset_key, "_", dist_tag, ".csv")),
+                row.names = FALSE)
+      write.csv(gam_resample_stats,
+                file = file.path(out_dir, paste0("GAM_resample_stats_", dataset_key, ".csv")),
+                row.names = FALSE)
+      write.csv(gam_full_contrib,
+                file = file.path(out_dir, paste0("GAM_full_contrib_", dataset_key, ".csv")),
+                row.names = FALSE)
+      ggsave(filename = file.path(out_dir, paste0("Moran_", dataset_key, ".png")),
+             plot = moran_plot, width = 8, height = 8, dpi = 300)
+      ggsave(filename = file.path(out_dir, paste0("BRT_pd_", dataset_key, ".png")),
+             plot = brt_plot, width = 10, height = 6, dpi = 300)
+      ggsave(filename = file.path(out_dir, paste0("GAM_pd_", dataset_key, ".png")),
+             plot = gam_plot, width = 10, height = 6, dpi = 300)
+      
+      cat("written ", dataset_label, " outputs:\n", sep = "")
+      cat(" ", file.path(out_dir, paste0("BRT_pd_", dataset_key, "_all.csv")), "—", nrow(brt_pd_all), "rows\n")
+      cat(" ", file.path(out_dir, paste0("GAM_pd_", dataset_key, "_all.csv")), "—", nrow(gam_pd_all), "rows\n")
+      cat(" ", file.path(out_dir, paste0("GAM_resample_stats_", dataset_key, ".csv")), "—", nrow(gam_resample_stats), "rows\n")
+      cat(" ", file.path(out_dir, paste0("GAM_full_contrib_", dataset_key, ".csv")), "\n")
+      cat(" ", file.path(out_dir, paste0("BRT_pd_", dataset_key, ".png")), "\n")
+      cat(" ", file.path(out_dir, paste0("GAM_pd_", dataset_key, ".png")), "\n")
+    }
     
-    # pd_all — the full partial dependence comparison table
-    write.csv(pd_all,
-              file = file.path(out_dir, "BRT_pd_all.csv"),
-              row.names = FALSE)
+    coords.all <- as.matrix(bindensModOverl[, c("lon", "lat")])
+    coords.wet <- as.matrix(bindensModOverl.wet[, c("lon", "lat")])
     
-    write.csv(pd100.wet,
-              file = file.path(out_dir, "BRT_pd_wet_100.csv"),
-              row.names = FALSE)
+    run_resampling_suite(
+      dat = bindensModOverl,
+      coords = coords.all,
+      brt_fit = brt.fit,
+      gam_fit = gam.fit,
+      mean_year_use = mean.year,
+      mean_lat_use = mean.lat,
+      dataset_key = "allpts",
+      dataset_label = "all points"
+    )
+    
+    run_resampling_suite(
+      dat = bindensModOverl.wet,
+      coords = coords.wet,
+      brt_fit = brt.fit.wet,
+      gam_fit = gam.fit.wet,
+      mean_year_use = mean.year.wet,
+      mean_lat_use = mean.lat.wet,
+      dataset_key = "wet",
+      dataset_label = "wet-only points"
+    )
     
     # scaling parameters as a one-row lookup table
     sc_params <- data.frame(
@@ -1219,7 +1569,6 @@ r.max.gen.Cole.sd <- mean(c((r.max.gen.Cole - r.max.lo.gen.Cole)/1.96, (r.max.up
               row.names = FALSE)
     
     cat("written:\n")
-    cat(" ", file.path(out_dir, "BRT_pd_all.csv"),       "—", nrow(pd_all), "rows\n")
     cat(" ", file.path(out_dir, "BRT_scaling_params.csv"), "— scaling parameters\n")
     
     
